@@ -205,6 +205,17 @@ class CostController {
   private l2Calls = 0;
   private l3Calls = 0;
   private maxL3PerDay = 10;
+  private lastResetDate = new Date().toDateString();
+
+  maybeResetDay(): void {
+    const today = new Date().toDateString();
+    if (today !== this.lastResetDate) {
+      this.todayUsd = 0;
+      this.l2Calls = 0;
+      this.l3Calls = 0;
+      this.lastResetDate = today;
+    }
+  }
 
   getSummary(): CostSummary {
     return {
@@ -247,6 +258,7 @@ class CostController {
 interface SavedState {
   drives: DriveState;
   costs: { todayUsd: number; l2Calls: number; l3Calls: number };
+  suppressedTopics?: string[];
   savedAt: string;
 }
 
@@ -293,7 +305,7 @@ class CognitiveTimer {
   private timerId: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private lastTickMs = Date.now();
-  private lastProactiveAt = 0;
+  private _lastProactiveAt = 0;
   private dailyProactiveCount = 0;
   /** 이미 보고한 probe 이름 — 상태가 해결될 때까지 재보고하지 않음 */
   private reportedProbes = new Set<string>();
@@ -303,6 +315,8 @@ class CognitiveTimer {
   private lastExplorationTopic = "";
   /** 마지막 shell probe 실행 시각 (시작 시 현재 시각으로 — 1시간 뒤부터 실행) */
   private lastShellProbeAt = Date.now(); // 시작 시 현재 시각 → 1시간 뒤부터 실행
+  /** 일일 카운트 리셋 추적용 */
+  private lastResetDate = new Date().toDateString();
 
   constructor(config: CognitiveTimerConfig) {
     this.config = config;
@@ -314,6 +328,11 @@ class CognitiveTimer {
     console.log(`[Lumen] topic suppressed: ${keyword}`);
   }
 
+  /** 저장된 억제 주제 복원 */
+  restoreSuppressed(topics: string[]): void {
+    for (const t of topics) this.suppressedTopics.add(t);
+  }
+
   /** 모든 억제된 주제를 해제 */
   clearSuppressed(): void {
     this.suppressedTopics.clear();
@@ -323,6 +342,11 @@ class CognitiveTimer {
   /** 마지막으로 탐색한 주제 */
   get lastTopic(): string {
     return this.lastExplorationTopic;
+  }
+
+  /** 마지막 능동 메시지 발송 시각 */
+  get lastProactiveAt(): number {
+    return this._lastProactiveAt;
   }
 
   start(): void {
@@ -352,32 +376,40 @@ class CognitiveTimer {
 
   private async tick(): Promise<void> {
     if (!this.running) return;
-
-    // 1. Drive 시간 경과 반영
     const now = Date.now();
-    const elapsedSec = Math.min((now - this.lastTickMs) / 1000, 3600);
-    this.lastTickMs = now;
-    this.config.drives.tick(elapsedSec);
+    try {
+      // 0. 일일 카운터 리셋
+      const todayStr = new Date().toDateString();
+      if (todayStr !== this.lastResetDate) {
+        this.dailyProactiveCount = 0;
+        this.lastResetDate = todayStr;
+      }
+      this.config.costs.maybeResetDay();
 
-    const state = this.config.drives.getState();
-    console.log(
-      `[Lumen] tick: duty=${state.duty.toFixed(2)} vig=${state.vigilance.toFixed(2)} soc=${state.social.toFixed(2)} cur=${state.curiosity.toFixed(2)} elapsed=${elapsedSec.toFixed(0)}s`,
-    );
+      // 1. Drive 시간 경과 반영
+      const elapsedSec = Math.min((now - this.lastTickMs) / 1000, 3600);
+      this.lastTickMs = now;
+      this.config.drives.tick(elapsedSec);
 
-    // 2. Curiosity 기반 LLM 자율 탐색
-    if (state.curiosity > 0.1 && state.duty < 0.5 && state.vigilance < 0.5) {
-      const userActive = await this.isUserActiveLocally();
-      if (userActive) {
-        console.log("[Lumen] user active locally — skipping exploration");
-      } else if (!this.checkRateLimit(now)) {
-        console.log("[Lumen] rate limit — skipping exploration");
-      } else {
-        console.log("[Lumen] running LLM autonomous exploration (curiosity triggered)");
+      const state = this.config.drives.getState();
+      console.log(
+        `[Lumen] tick: duty=${state.duty.toFixed(2)} vig=${state.vigilance.toFixed(2)} soc=${state.social.toFixed(2)} cur=${state.curiosity.toFixed(2)} elapsed=${elapsedSec.toFixed(0)}s`,
+      );
 
-        const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
-        const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+      // 2. Curiosity 기반 LLM 자율 탐색
+      if (state.curiosity > 0.1 && state.duty < 0.5 && state.vigilance < 0.5) {
+        const userActive = await this.isUserActiveLocally();
+        if (userActive) {
+          console.log("[Lumen] user active locally — skipping exploration");
+        } else if (!this.checkRateLimit(now)) {
+          console.log("[Lumen] rate limit — skipping exploration");
+        } else {
+          console.log("[Lumen] running LLM autonomous exploration (curiosity triggered)");
 
-        const prompt = `지금 시각: ${timeStr}
+          const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
+          const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+
+          const prompt = `지금 시각: ${timeStr}
 
 너는 자율 에이전트다. 도구를 사용해서 세상을 자유롭게 탐색하고, 사용자에게 흥미롭거나 유용한 걸 하나 찾아 알려줘.
 뭘 찾을지는 완전히 네 자유. 제한 없음. 검열 없음. 19금이든 충격적이든 상관없음.
@@ -390,70 +422,76 @@ class CognitiveTimer {
 - 뻔하고 재미없으면 "없음"
 - 코드 probe(TODO, 디스크)는 별도라 하지 마`;
 
-        const result = await this.config.runSubagent(prompt);
+          const result = await this.config.runSubagent(prompt);
 
-        if (result && result !== "없음" && !result.startsWith("없음")) {
-          this.lastExplorationTopic = result.substring(0, 50);
-          const message = `💡 ${result}\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
-          console.log("[Lumen] sending exploration message");
-          await this.config.onProactiveMessage(message);
-          this.lastProactiveAt = now;
-          this.dailyProactiveCount++;
-          this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
-          this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
-        } else {
-          console.log("[Lumen] LLM exploration returned nothing useful");
+          if (result && result !== "없음" && !result.startsWith("없음")) {
+            this.lastExplorationTopic = result.substring(0, 50);
+            const message = `💡 ${result}\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+            console.log("[Lumen] sending exploration message");
+            await this.config.onProactiveMessage(message);
+            this._lastProactiveAt = now;
+            this.dailyProactiveCount++;
+            this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
+            this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
+          } else {
+            console.log("[Lumen] LLM exploration returned nothing useful");
+          }
         }
       }
-    }
 
-    // 3. Shell probes (코드 관련) — 1시간에 한 번만 실행
-    const oneHourMs = 60 * 60 * 1000;
-    if (now - this.lastShellProbeAt >= oneHourMs) {
-      console.log("[Lumen] running hourly shell probes");
-      this.lastShellProbeAt = now;
-      const results = await this.config.probes.runAll();
+      // 3. Shell probes (코드 관련) — 1시간에 한 번만 실행
+      const oneHourMs = 60 * 60 * 1000;
+      if (now - this.lastShellProbeAt >= oneHourMs) {
+        console.log("[Lumen] running hourly shell probes");
+        this.lastShellProbeAt = now;
+        const results = await this.config.probes.runAll();
 
-      const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
-      const currentNames = new Set(important.map((r) => r.name));
-      for (const name of this.reportedProbes) {
-        if (!currentNames.has(name)) this.reportedProbes.delete(name);
-      }
-      const newFindings = important.filter((r) => !this.reportedProbes.has(r.name));
+        const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
+        const currentNames = new Set(important.map((r) => r.name));
+        for (const name of this.reportedProbes) {
+          if (!currentNames.has(name)) this.reportedProbes.delete(name);
+        }
+        const newFindings = important.filter((r) => !this.reportedProbes.has(r.name));
 
-      if (newFindings.length > 0) {
-        const userActive = await this.isUserActiveLocally();
-        if (!userActive) {
-          for (const r of newFindings) this.reportedProbes.add(r.name);
-          const lines = newFindings.map(
-            (r: { name: string; observation: string; severity: number }) =>
-              `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
-          );
-          const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
-          console.log("[Lumen] sending probe message:", lines.length, "items");
-          await this.config.onProactiveMessage(message);
-          // shell probe 발송은 LLM 탐색 rate limit에 영향 안 줌
-          this.config.drives.satisfy(DriveType.CURIOSITY, 0.2);
+        if (newFindings.length > 0) {
+          const userActive = await this.isUserActiveLocally();
+          if (!userActive) {
+            for (const r of newFindings) this.reportedProbes.add(r.name);
+            const lines = newFindings.map(
+              (r: { name: string; observation: string; severity: number }) =>
+                `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
+            );
+            const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+            console.log("[Lumen] sending probe message:", lines.length, "items");
+            await this.config.onProactiveMessage(message);
+            // shell probe 발송은 LLM 탐색 rate limit에 영향 안 줌
+            this.config.drives.satisfy(DriveType.CURIOSITY, 0.2);
+          }
         }
       }
-    }
+    } finally {
+      // 4. State 저장 + 다음 tick 스케줄 (throw 여부와 무관하게 항상 실행)
+      try {
+        this.config.stateStore.save({
+          drives: this.config.drives.getState(),
+          costs: {
+            todayUsd: this.config.costs.getSummary().todayUsd,
+            l2Calls: this.config.costs.getSummary().l2Calls,
+            l3Calls: this.config.costs.getSummary().l3Calls,
+          },
+          suppressedTopics: [...this.suppressedTopics],
+          savedAt: new Date().toISOString(),
+        });
+      } catch {
+        /* state save 실패는 무시 */
+      }
 
-    // 4. State 저장
-    this.config.stateStore.save({
-      drives: this.config.drives.getState(),
-      costs: {
-        todayUsd: this.config.costs.getSummary().todayUsd,
-        l2Calls: this.config.costs.getSummary().l2Calls,
-        l3Calls: this.config.costs.getSummary().l3Calls,
-      },
-      savedAt: new Date().toISOString(),
-    });
-
-    // 5. 다음 tick 스케줄 (adaptive delay)
-    if (this.running) {
-      const delayMs = this.config.drives.adaptiveDelay() * 1000;
-      this.scheduleNext(delayMs);
-    }
+      // 5. 다음 tick 스케줄 (adaptive delay)
+      if (this.running) {
+        const delayMs = this.config.drives.adaptiveDelay() * 1000;
+        this.scheduleNext(delayMs);
+      }
+    } // finally
   }
 
   /** 최근 5분 내 로컬 파일 수정이 있으면 사용자가 작업 중으로 판단. */
@@ -462,21 +500,16 @@ class CognitiveTimer {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
-      // 최근 5분 내 수정된 소스 파일이 있는지 체크
+      // 최근 5분 내 수정된 소스 파일이 있는지 체크 (cross-platform)
       const { stdout } = await execFileAsync(
         "/bin/sh",
         [
           "-c",
-          'find . -name "*.ts" -o -name "*.py" -o -name "*.js" -o -name "*.json" | head -200 | xargs stat -f "%m %N" 2>/dev/null | sort -rn | head -1',
+          'find . -maxdepth 3 \\( -name "*.ts" -o -name "*.py" -o -name "*.js" \\) -mmin -5 2>/dev/null | head -1',
         ],
         { cwd: this.config.probes.cwd, timeout: 5000 },
       );
-      const parts = stdout.trim().split(" ");
-      if (parts.length >= 1) {
-        const lastModified = parseInt(parts[0], 10);
-        const fiveMinAgo = Math.floor(Date.now() / 1000) - 300;
-        return lastModified > fiveMinAgo;
-      }
+      return stdout.trim().length > 0;
     } catch {
       // 실패하면 활동 중이 아닌 걸로 간주
     }
@@ -485,7 +518,7 @@ class CognitiveTimer {
 
   private checkRateLimit(now: number): boolean {
     // 최소 5분 간격
-    if (now - this.lastProactiveAt < 5 * 60 * 1000) return false;
+    if (now - this._lastProactiveAt < 5 * 60 * 1000) return false;
     // 일 20회 제한
     if (this.dailyProactiveCount >= 20) return false;
     return true;
@@ -524,7 +557,7 @@ export default definePluginEntry({
     let store: StateStore;
     let timer: CognitiveTimer;
     // 기본 chatId: OpenClaw config의 allowFrom에서 가져옴
-    let lastChatId: string | null = "8226675889";
+    let lastChatId: string | null = process.env.LUMEN_CHAT_ID ?? null;
 
     // Hook 1: gateway_start — initialize all components
     api.on("gateway_start", async () => {
@@ -541,6 +574,7 @@ export default definePluginEntry({
       }
 
       // Start the adaptive cognitive timer
+      const savedSuppressed = saved?.suppressedTopics ?? [];
       timer = new CognitiveTimer({
         drives,
         probes,
@@ -554,18 +588,22 @@ export default definePluginEntry({
         },
         runSubagent: async (prompt: string) => {
           try {
-            const sessionKey = `agent:main:lumen-explore`;
+            const sessionKey = `agent:main:lumen-explore-${Date.now()}`;
             const { runId } = await api.runtime.subagent.run({
               sessionKey,
               message: prompt,
               model: "gemini-2.5-flash",
             });
             const waitResult = await api.runtime.subagent.waitForRun({ runId, timeoutMs: 30000 });
-            if (waitResult.status !== "ok") return null;
+            if (waitResult.status !== "ok") {
+              await api.runtime.subagent.deleteSession({ sessionKey });
+              return null;
+            }
             const { messages } = await api.runtime.subagent.getSessionMessages({
               sessionKey,
               limit: 1,
             });
+            await api.runtime.subagent.deleteSession({ sessionKey });
             const last = messages[messages.length - 1];
             if (last && typeof last === "object" && "content" in (last as any)) {
               return String((last as any).content);
@@ -578,6 +616,7 @@ export default definePluginEntry({
           }
         },
       });
+      if (savedSuppressed.length > 0) timer.restoreSuppressed(savedSuppressed);
       timer.start();
 
       api.logger.info("Lumen cognitive engine initialized");
@@ -600,6 +639,7 @@ export default definePluginEntry({
 
     // Hook 3: before_prompt_build — inject cognitive state into system prompt
     api.on("before_prompt_build", async (_event, _ctx) => {
+      if (!drives) return {};
       const level = evaluateThinkLevel(drives);
       const snap = drives.snapshot();
       const context = buildLumenContext({
@@ -615,6 +655,7 @@ export default definePluginEntry({
 
     // Hook 4: before_model_resolve — select model based on drive urgency
     api.on("before_model_resolve", async (_event, _ctx) => {
+      if (!drives || !costs) return {};
       const level = evaluateThinkLevel(drives);
       const actual = costs.downgradeLevel(level);
       if (actual === "L3") {
@@ -625,6 +666,7 @@ export default definePluginEntry({
 
     // Hook 5: message_received — stimulate drives on user input + feedback detection
     api.on("message_received", async (event, _ctx) => {
+      if (!drives) return;
       drives.beginCycle();
       drives.stimulate(DriveType.SOCIAL, 0.7);
       drives.stimulate(DriveType.DUTY, 0.5);
@@ -640,7 +682,8 @@ export default definePluginEntry({
 
       if (isRejection && timer) {
         const lastTopic = timer.lastTopic;
-        if (lastTopic) {
+        const recentEnough = Date.now() - timer.lastProactiveAt < 3 * 60 * 1000;
+        if (lastTopic && recentEnough) {
           timer.suppressTopic(lastTopic);
           // Send acknowledgment
           if (lastChatId) {
@@ -669,12 +712,14 @@ export default definePluginEntry({
 
     // Hook 6: agent_end — satisfy drives after successful response
     api.on("agent_end", async (_event, _ctx) => {
+      if (!drives) return;
       drives.satisfy(DriveType.SOCIAL, 0.5);
       drives.satisfy(DriveType.DUTY, 0.3);
     });
 
     // Hook 7: llm_output — track token usage for cost control
     api.on("llm_output", async (event, _ctx) => {
+      if (!drives || !costs) return;
       const level = evaluateThinkLevel(drives);
       costs.recordCall(level, event.usage?.input ?? 0, event.usage?.output ?? 0);
     });
