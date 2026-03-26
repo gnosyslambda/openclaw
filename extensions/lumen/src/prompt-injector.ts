@@ -60,6 +60,7 @@ export function buildLumenContext(params: {
 }): string {
   const { drives, probeResults, costSummary } = params;
   const state = drives.getState();
+  const level = evaluateThinkLevel(drives);
 
   const driveLines = (Object.keys(state) as Array<keyof DriveState>)
     .map((key) => {
@@ -97,14 +98,12 @@ export function buildLumenContext(params: {
     "  \uC0AC\uC6A9\uC790\uAC00 \uBB34\uC5B8\uAC00\uB97C \uC694\uCCAD\uD558\uBA74, \uC774\uBC88 \uC751\uB2F5\uC5D0\uC11C \uBC14\uB85C \uB2F5\uD574\uC57C \uD55C\uB2E4.",
     "- \uD56D\uC0C1 \uD55C\uAD6D\uC5B4\uB85C \uC790\uC5F0\uC2A4\uB7FD\uAC8C \uB300\uD654\uD55C\uB2E4.",
     "",
-    "### 응답 형식 (필수)",
-    "모든 응답의 맨 끝에 반드시 아래 형식의 인지 상태 태그를 포함한다:",
-    "```",
-    `\u{1F9E0} [L2] duty:0.52 vig:0.15 soc:0.60 cur:0.18`,
-    "```",
-    "- L1/L2/L3는 현재 사고 수준이다.",
-    "- 각 값은 위 Drive 수준의 실제 값을 반영한다.",
-    "- 태그는 응답 본문과 빈 줄로 구분한다.",
+    "### 응답 형식 (필수 — 반드시 지킬 것)",
+    "너의 모든 응답 맨 마지막 줄에 아래 태그를 반드시 그대로 붙여라. 생략하지 마라:",
+    "",
+    `🧠 [${level}] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`,
+    "",
+    "위 줄을 응답 본문 뒤에 빈 줄 하나 넣고 그대로 복사해서 붙여라.",
     "",
     "### \uD658\uACBD \uAD00\uCC30 (\uCD5C\uADFC Probe \uACB0\uACFC)",
     probeLines,

@@ -291,11 +291,16 @@ export default definePluginEntry({
 
     // Hook 3: before_prompt_build — inject cognitive state into system prompt
     api.on("before_prompt_build", async (_event, _ctx) => {
+      const level = evaluateThinkLevel(drives);
+      const snap = drives.snapshot();
       const context = buildLumenContext({
         drives,
         probeResults: probes.pendingResults,
         costSummary: costs.getSummary(),
       });
+      api.logger.info(
+        `[Lumen] prompt injected: ${level} duty=${snap.duty.toFixed(2)} soc=${snap.social.toFixed(2)} cur=${snap.curiosity.toFixed(2)}`,
+      );
       return { appendSystemContext: context };
     });
 
