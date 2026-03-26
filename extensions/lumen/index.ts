@@ -622,11 +622,24 @@ export default definePluginEntry({
               limit: 1,
             });
             await api.runtime.subagent.deleteSession({ sessionKey });
-            const last = messages[messages.length - 1];
-            if (last && typeof last === "object" && "content" in (last as any)) {
-              return String((last as any).content);
-            }
+            const last = messages[messages.length - 1] as any;
+            console.log(
+              "[Lumen] subagent response type:",
+              typeof last,
+              JSON.stringify(last)?.substring(0, 200),
+            );
+            if (!last) return null;
+            // OpenClaw 메시지 형식: {role, content} 또는 {role, content: [{type, text}]}
             if (typeof last === "string") return last;
+            if (typeof last?.content === "string") return last.content;
+            if (Array.isArray(last?.content)) {
+              const texts = last.content
+                .filter((c: any) => c?.type === "text" || typeof c === "string")
+                .map((c: any) => (typeof c === "string" ? c : (c?.text ?? "")))
+                .filter(Boolean);
+              return texts.join("\n") || null;
+            }
+            if (typeof last?.text === "string") return last.text;
             return null;
           } catch (err) {
             console.error("[Lumen] subagent exploration failed:", err);
