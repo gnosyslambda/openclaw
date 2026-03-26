@@ -4,7 +4,17 @@
   "private": true,
   "description": "Lumen Cognitive Engine — adaptive urgency and proactive agent behavior",
   "type": "module",
-  "peerDependencies": { "openclaw": ">=2026.3.22" },
-  "peerDependenciesMeta": { "openclaw": { "optional": true } },
-  "openclaw": { "extensions": ["./index.ts"] }
+  "peerDependencies": {
+    "openclaw": ">=2026.3.22"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
 }

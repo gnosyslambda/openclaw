@@ -1545,6 +1545,47 @@ export const GENERATED_BUNDLED_PLUGIN_METADATA = [
     },
   },
   {
+    dirName: "lumen",
+    idHint: "lumen",
+    source: {
+      source: "./index.ts",
+      built: "index.js",
+    },
+    packageName: "@openclaw/lumen",
+    packageVersion: "0.1.0",
+    packageDescription: "Lumen Cognitive Engine — adaptive urgency and proactive agent behavior",
+    packageManifest: {
+      extensions: ["./index.ts"],
+    },
+    manifest: {
+      id: "lumen",
+      configSchema: {
+        type: "object",
+        properties: {
+          dailyBudget: {
+            type: "number",
+            default: 1,
+          },
+          l3DailyLimit: {
+            type: "number",
+            default: 20,
+          },
+          probeEnabled: {
+            type: "boolean",
+            default: true,
+          },
+          proactiveEnabled: {
+            type: "boolean",
+            default: true,
+          },
+          defaultChatId: {
+            type: "string",
+          },
+        },
+      },
+    },
+  },
+  {
     dirName: "matrix",
     idHint: "matrix",
     source: {

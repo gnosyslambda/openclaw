@@ -36,17 +36,10 @@ function todayStartMs(): number {
 }
 
 /** Compute cost from token counts, falling back to fixed estimate. */
-function computeCost(
-  level: string,
-  inputTokens: number,
-  outputTokens: number,
-): number {
+function computeCost(level: string, inputTokens: number, outputTokens: number): number {
   if (inputTokens > 0 || outputTokens > 0) {
     const prices = TOKEN_PRICES[level] ?? TOKEN_PRICES.L1;
-    return (
-      (inputTokens * prices.input) / 1_000_000 +
-      (outputTokens * prices.output) / 1_000_000
-    );
+    return (inputTokens * prices.input) / 1_000_000 + (outputTokens * prices.output) / 1_000_000;
   }
   return COST_PER_CALL[level] ?? 0.0;
 }
@@ -70,11 +63,7 @@ export class CostController {
   }
 
   /** Record an LLM call. Token-based cost if available, else fixed estimate. */
-  recordCall(
-    level: string,
-    inputTokens: number = 0,
-    outputTokens: number = 0,
-  ): void {
+  recordCall(level: string, inputTokens: number = 0, outputTokens: number = 0): void {
     const now = Date.now();
     this.maybeResetDay(now);
 
@@ -143,8 +132,7 @@ export class CostController {
       l2Ratio: l2Count / count,
       l3Ratio: l3Count / count,
       budgetRemaining: Math.max(0.0, this.dailyBudget - totalCost),
-      budgetUsedRatio:
-        this.dailyBudget > 0 ? totalCost / this.dailyBudget : 1.0,
+      budgetUsedRatio: this.dailyBudget > 0 ? totalCost / this.dailyBudget : 1.0,
     };
   }
 

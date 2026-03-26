@@ -148,7 +148,8 @@ export class ProbeRunner {
           return {
             name: "hardcoded_secrets",
             value: Math.min(1, n / 5),
-            observation: n === 0 ? "no hardcoded secrets detected" : `${n} potential hardcoded secrets`,
+            observation:
+              n === 0 ? "no hardcoded secrets detected" : `${n} potential hardcoded secrets`,
             severity: n > 0 ? Math.min(1, 0.5 + n * 0.1) : 0,
           };
         },
@@ -192,9 +193,7 @@ export class ProbeRunner {
               name: string;
             }>;
             const failed = runs.filter((r) => r.conclusion === "failure").length;
-            const summary = runs
-              .map((r) => `${r.name}: ${r.conclusion || r.status}`)
-              .join(", ");
+            const summary = runs.map((r) => `${r.name}: ${r.conclusion || r.status}`).join(", ");
             return {
               name: "github_actions",
               value: Math.min(1, failed / runs.length),
@@ -347,9 +346,7 @@ export class ProbeRunner {
     }
 
     const results: ProbeResult[] = [];
-    const settled = await Promise.allSettled(
-      due.map((p) => this.runProbe(p)),
-    );
+    const settled = await Promise.allSettled(due.map((p) => this.runProbe(p)));
 
     for (const outcome of settled) {
       if (outcome.status === "fulfilled" && outcome.value !== null) {

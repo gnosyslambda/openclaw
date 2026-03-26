@@ -24,9 +24,7 @@ const GROWTH_RATES: Record<DriveType, number> = {
  * When source is high, target's growth is suppressed.
  * target_growth *= (1 - suppressFactor * source_level)
  */
-const DRIVE_INTERACTIONS: ReadonlyArray<
-  [source: DriveType, target: DriveType, factor: number]
-> = [
+const DRIVE_INTERACTIONS: ReadonlyArray<[source: DriveType, target: DriveType, factor: number]> = [
   [DriveType.DUTY, DriveType.CURIOSITY, 0.6], // busy → less exploration
   [DriveType.VIGILANCE, DriveType.CURIOSITY, 0.4], // alert → less exploration
   [DriveType.DUTY, DriveType.SOCIAL, 0.3], // busy → slight report delay
@@ -132,9 +130,7 @@ export class DriveSystem {
 
   /** Apply a map of drive impacts (e.g. from an event). */
   applyImpacts(impacts: Partial<Record<DriveType, number>>): void {
-    for (const [drive, amount] of Object.entries(impacts) as Array<
-      [DriveType, number]
-    >) {
+    for (const [drive, amount] of Object.entries(impacts) as Array<[DriveType, number]>) {
       this.stimulate(drive, amount);
     }
   }

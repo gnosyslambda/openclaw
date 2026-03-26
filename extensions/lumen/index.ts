@@ -7,8 +7,8 @@
  */
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { buildLumenContext, evaluateThinkLevel } from "./prompt-injector.js";
-import type { DriveState, DriveSystem, ProbeResult, CostSummary } from "./prompt-injector.js";
+import { buildLumenContext, evaluateThinkLevel } from "./src/prompt-injector.js";
+import type { DriveState, DriveSystem, ProbeResult, CostSummary } from "./src/prompt-injector.js";
 
 // ─── Drive Types ────────────────────────────────────────────────────
 
@@ -264,11 +264,7 @@ export default definePluginEntry({
         stateStore: store,
         onProactiveMessage: async (message: string) => {
           if (lastChatId) {
-            await api.runtime.channel.telegram.sendMessageTelegram(
-              lastChatId,
-              message,
-              {},
-            );
+            await api.runtime.channel.telegram.sendMessageTelegram(lastChatId, message, {});
             drives.satisfy(DriveType.SOCIAL, 0.5);
           }
         },
@@ -308,9 +304,9 @@ export default definePluginEntry({
       const level = evaluateThinkLevel(drives);
       const actual = costs.downgradeLevel(level);
       if (actual === "L3") {
-        return { model: "google/gemini-2.5-pro" };
+        return { modelOverride: "google/gemini-2.5-pro" };
       }
-      return { model: "google/gemini-2.5-flash" };
+      return { modelOverride: "google/gemini-2.5-flash" };
     });
 
     // Hook 5: message_received — stimulate drives on user input

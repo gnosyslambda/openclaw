@@ -1,6 +1,5 @@
 {
   "id": "lumen",
-  "kind": "extension",
   "configSchema": {
     "type": "object",
     "properties": {

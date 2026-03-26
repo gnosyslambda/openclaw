@@ -119,9 +119,7 @@ export class CognitiveTimer {
       const results = await this.probes.runDueProbes();
 
       // 3. Check for high-severity results
-      const highSeverity = results.filter(
-        (r) => r.severity >= HIGH_SEVERITY_THRESHOLD,
-      );
+      const highSeverity = results.filter((r) => r.severity >= HIGH_SEVERITY_THRESHOLD);
 
       if (highSeverity.length > 0 && this.onProactiveMessage) {
         await this.maybeProactiveMessage(highSeverity);
@@ -154,9 +152,7 @@ export class CognitiveTimer {
 
   // ── Rate-Limited Proactive Messaging ────────────────────────────────────
 
-  private async maybeProactiveMessage(
-    results: ProbeResult[],
-  ): Promise<void> {
+  private async maybeProactiveMessage(results: ProbeResult[]): Promise<void> {
     if (!this.onProactiveMessage) return;
 
     const now = Date.now();
@@ -172,20 +168,16 @@ export class CognitiveTimer {
     if (this.rateLimit.dailyProactiveCount >= DAILY_CAP) return;
 
     // Check minimum interval with backoff
-    const effectiveInterval = Math.max(
-      MIN_INTERVAL_MS,
-      this.rateLimit.currentBackoffMs,
-    );
+    const effectiveInterval = Math.max(MIN_INTERVAL_MS, this.rateLimit.currentBackoffMs);
     if (now - this.rateLimit.lastProactiveAt < effectiveInterval) return;
 
     // Build message from high-severity results
     const lines = results.map(
       (r) => `- **${r.name}** (severity ${r.severity.toFixed(2)}): ${r.observation}`,
     );
-    const message = [
-      `[Lumen Probe Alert] ${results.length} issue(s) detected:`,
-      ...lines,
-    ].join("\n");
+    const message = [`[Lumen Probe Alert] ${results.length} issue(s) detected:`, ...lines].join(
+      "\n",
+    );
 
     try {
       await this.onProactiveMessage(message);

@@ -71,14 +71,13 @@ export function buildLumenContext(params: {
 
   const probeLines =
     probeResults.length > 0
-      ? probeResults
-          .map((p) => `  - [${p.name}] ${p.summary} (severity ${p.severity})`)
-          .join("\n")
+      ? probeResults.map((p) => `  - [${p.name}] ${p.summary} (severity ${p.severity})`).join("\n")
       : "  (없음)";
 
-  const pct = costSummary.dailyBudgetUsd > 0
-    ? ((costSummary.todayUsd / costSummary.dailyBudgetUsd) * 100).toFixed(1)
-    : "0.0";
+  const pct =
+    costSummary.dailyBudgetUsd > 0
+      ? ((costSummary.todayUsd / costSummary.dailyBudgetUsd) * 100).toFixed(1)
+      : "0.0";
 
   const costLine =
     `  \uC624\uB298: $${costSummary.todayUsd.toFixed(3)} / $${costSummary.dailyBudgetUsd.toFixed(2)} (${pct}%), ` +
