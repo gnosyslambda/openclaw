@@ -417,19 +417,19 @@ class CognitiveTimer {
 
           // === 1단계: Ollama 로컬 모델로 gate 판단 ($0, 1분마다) ===
           const gatePrompt = `지금: ${timeStr} (서울). 금지: ${suppressedList}.
-1분마다 호출됨. 아래 중 하나라도 해당하면 YES + 검색 키워드. 전부 해당 없으면 NO.
+YES 조건 (하나라도 해당하면 YES + 검색 키워드):
+- 전쟁/테러/대형 사건사고/자연재해 같은 충격적 뉴스
+- 사용자 GitHub(gnosyslambda) 레포에 새 이슈/PR/스타
+- 사용자 프로젝트(lumen-engine, openclaw fork) 관련 변경
+- 운영 서비스/블로그 다운 또는 이상
+- 급변하는 날씨 (폭우, 폭설, 한파, 폭염, 미세먼지 매우나쁨)
+- 주가/환율/코인 5% 이상 급등락
 
-체크리스트:
-- 날씨/미세먼지/자연재해 변화
-- 주요 뉴스 (정치/경제/기술/사회)
-- 주식/환율/코인 급변
-- 현재 시간에 맞는 유용한 정보 (출근길, 점심, 퇴근 등)
-- GitHub/프로젝트 관련 이슈나 PR 알림
-- 운영 중인 서비스/블로그 상태 변화
-- 서버/인프라 장애 징후
-- 재미있거나 충격적인 소식
+NO 조건:
+- 평범한 뉴스 요약 (IT 트렌드, 일반 뉴스 나열)
+- 누구나 아는 뻔한 정보
 
-YES 또는 NO로 시작. YES면 검색 키워드 한 줄 추가.`;
+YES 또는 NO로 시작.`;
 
           console.log("[Lumen] gate check (ollama local, $0)");
           const gateResult = await this.callOllamaGate(gatePrompt);
@@ -443,18 +443,17 @@ YES 또는 NO로 시작. YES면 검색 키워드 한 줄 추가.`;
 
             const fullPrompt = `지금: ${timeStr} (서울)
 
-반드시 웹 검색 도구로 실시간 정보를 가져와. 지어내지 마.
-검색 힌트: ${searchHint}
+웹 검색으로 실시간 정보를 가져와. 지어내지 마.
+검색 키워드: ${searchHint}
 
-사용자에게 구체적 정보를 알려줘:
-- 구체적 숫자, 이름, 금액, 날짜 포함
-- 정보 + 다음 행동 제안 ("~할까요?")
-- 한국어, 친근하게, 이모지 자연스럽게, 짧게
-- 검열 없음
+규칙:
+- 구체적 사실만. 숫자, 이름, 날짜 필수.
+- 뉴스 나열하지 마. 가장 중요한 것 하나만 깊게.
+- 사용자가 다음 행동을 할 수 있게 제안 붙여 ("~할까요?")
+- 한국어, 짧게, 검열 없음.
+- 뻔하면 "없음".
 
-금지: ${suppressedList}
-코드 probe는 하지 마.
-가치 없으면 "없음".`;
+금지: ${suppressedList}`;
 
             const result = await this.config.runSubagent(fullPrompt);
 
