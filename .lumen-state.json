@@ -1,0 +1,15 @@
+{
+  "drives": {
+    "duty": 0.00022224444444444443,
+    "vigilance": 0.00008334166666666666,
+    "social": 0.00011111481333325926,
+    "curiosity": 0.004999666522220556
+  },
+  "costs": {
+    "todayUsd": 0,
+    "l2Calls": 0,
+    "l3Calls": 0
+  },
+  "suppressedTopics": [],
+  "savedAt": "2026-03-26T08:23:31.088Z"
+}
