@@ -301,8 +301,8 @@ class CognitiveTimer {
   private suppressedTopics = new Set<string>();
   /** 마지막으로 보낸 탐색 주제 (ㄴㄴ 매칭용) */
   private lastExplorationTopic = "";
-  /** 마지막 shell probe 실행 시각 */
-  private lastShellProbeAt = 0;
+  /** 마지막 shell probe 실행 시각 (시작 시 현재 시각으로 — 1시간 뒤부터 실행) */
+  private lastShellProbeAt = Date.now(); // 시작 시 현재 시각 → 1시간 뒤부터 실행
 
   constructor(config: CognitiveTimerConfig) {
     this.config = config;
@@ -423,7 +423,7 @@ class CognitiveTimer {
 
       if (newFindings.length > 0) {
         const userActive = await this.isUserActiveLocally();
-        if (!userActive && this.checkRateLimit(now)) {
+        if (!userActive) {
           for (const r of newFindings) this.reportedProbes.add(r.name);
           const lines = newFindings.map(
             (r: { name: string; observation: string; severity: number }) =>
@@ -432,8 +432,7 @@ class CognitiveTimer {
           const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
           console.log("[Lumen] sending probe message:", lines.length, "items");
           await this.config.onProactiveMessage(message);
-          this.lastProactiveAt = now;
-          this.dailyProactiveCount++;
+          // shell probe 발송은 LLM 탐색 rate limit에 영향 안 줌
           this.config.drives.satisfy(DriveType.CURIOSITY, 0.2);
         }
       }
