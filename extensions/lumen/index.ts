@@ -68,7 +68,7 @@ class DriveSystemImpl implements DriveSystem {
       [DriveType.DUTY]: 0.08,
       [DriveType.VIGILANCE]: 0.03,
       [DriveType.SOCIAL]: 0.04,
-      [DriveType.CURIOSITY]: 3.0,
+      [DriveType.CURIOSITY]: 1.8, // ~5분이면 0.15, ~20분이면 0.6
     };
     for (const key of Object.values(DriveType)) {
       let rate = rates[key];
@@ -506,22 +506,31 @@ class CognitiveTimer {
     } // finally
   }
 
-  /** 최근 5분 내 로컬 파일 수정이 있으면 사용자가 작업 중으로 판단. */
+  /** 사용자가 현재 컴퓨터를 사용 중인지 판단 (idle time 기반). */
   private async isUserActiveLocally(): Promise<boolean> {
     try {
       const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
       const execFileAsync = promisify(execFile);
-      // 최근 5분 내 수정된 소스 파일이 있는지 체크 (cross-platform)
+      // macOS: ioreg로 HID idle time 확인 (초 단위)
+      // 5분(300초) 이내 입력이 있으면 활동 중
+      if (process.platform === "darwin") {
+        const { stdout } = await execFileAsync(
+          "/bin/sh",
+          ["-c", "ioreg -c IOHIDSystem | awk '/HIDIdleTime/{print int($NF/1000000000)}'"],
+          { timeout: 3000 },
+        );
+        const idleSec = parseInt(stdout.trim(), 10);
+        return !isNaN(idleSec) && idleSec < 300;
+      }
+      // Linux: xprintidle (밀리초) 또는 who -u의 idle 컬럼
       const { stdout } = await execFileAsync(
         "/bin/sh",
-        [
-          "-c",
-          'find . -maxdepth 3 \\( -name "*.ts" -o -name "*.py" -o -name "*.js" \\) -mmin -5 2>/dev/null | head -1',
-        ],
-        { cwd: this.config.probes.cwd, timeout: 5000 },
+        ["-c", "xprintidle 2>/dev/null || echo 999999999"],
+        { timeout: 3000 },
       );
-      return stdout.trim().length > 0;
+      const idleMs = parseInt(stdout.trim(), 10);
+      return !isNaN(idleMs) && idleMs < 300_000;
     } catch {
       // 실패하면 활동 중이 아닌 걸로 간주
     }
