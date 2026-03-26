@@ -417,20 +417,17 @@ class CognitiveTimer {
 
           // === 1단계: Ollama 로컬 모델로 gate 판단 ($0, 1분마다) ===
           const gatePrompt = `지금: ${timeStr} (서울). 금지: ${suppressedList}.
-너는 사용자의 비서다. 아래 대화 맥락을 보고 사용자에게 알려줄 만한 것을 판단해.
-YES의 기준은 넓게. 조금이라도 유용하거나 흥미로우면 YES.
+너는 사용자의 비서다. 대화 맥락을 보고, 지금 사용자에게 가장 유용한 정보를 웹에서 찾기 위한 검색 키워드를 생성해.
 
-YES 예시:
-- 날씨 변화 (비/눈/미세먼지/기온 급변)
-- 사용자 관심 분야 뉴스/트렌드
-- 사용자 프로젝트 관련 확인할 것
-- 시간에 맞는 정보 (저녁→내일 날씨, 아침→오늘 날씨)
-- 재미있거나 놀라운 소식
-- 사용자가 작업 중인 것과 관련된 기술 소식
+고려할 것:
+- 현재 시각과 상황 (아침→오늘 날씨, 저녁→내일 날씨 등)
+- 사용자가 작업 중인 프로젝트, 관심사
+- 사용자에게 실질적으로 도움되는 정보
 
-NO는 정말 아무것도 없을 때만. 대부분 YES여도 괜찮다.
-
-YES 또는 NO로 시작. YES면 검색할 키워드 한 줄.`;
+검색 키워드만 한 줄로 답해. 설명 없이 키워드만.
+예: "서울 오늘 저녁 날씨 미세먼지"
+예: "lumen-engine github issues 2026"
+예: "AI agent framework 최신 뉴스 2026년 3월"`;
 
           // 사용자 맥락 추출 (로컬 파일, $0)
           const userCtx = await this.getUserContext();
@@ -438,19 +435,14 @@ YES 또는 NO로 시작. YES면 검색할 키워드 한 줄.`;
             ? `${gatePrompt}\n\n최근 대화 맥락 (사용자가 관심 있는 것):\n${userCtx}`
             : gatePrompt;
 
-          console.log(
-            "[Lumen] gate check (ollama local, $0, context:",
-            userCtx ? "yes" : "none",
-            ")",
-          );
-          const gateResult = await this.callOllamaGate(fullGatePrompt);
-
-          if (!gateResult || !gateResult.toUpperCase().startsWith("YES")) {
-            console.log("[Lumen] gate: NO — nothing worth sending");
-          } else {
-            // === 2단계: 풀 탐색 (웹 검색 + 메시지 생성) ===
-            console.log("[Lumen] gate: YES — running full exploration");
-            const searchHint = gateResult.substring(3).trim();
+          // Ollama로 맥락 기반 검색 키워드 생성 ($0) — YES/NO gate 제거, 항상 실행
+          console.log("[Lumen] ollama keyword gen ($0, context:", userCtx ? "yes" : "none", ")");
+          const keywordResult = await this.callOllamaGate(fullGatePrompt);
+          const searchHint =
+            keywordResult?.replace(/^(YES|NO)\s*/i, "").trim() || "서울 날씨 주요뉴스";
+          console.log("[Lumen] keywords:", searchHint);
+          {
+            // Gemini 풀 탐색 (웹 검색 + 메시지 생성)
 
             const fullPrompt = `지금: ${timeStr} (서울)
 
@@ -646,7 +638,7 @@ YES 또는 NO로 시작. YES면 검색할 키워드 한 줄.`;
 
   private checkRateLimit(now: number): boolean {
     // 최소 5분 간격
-    if (now - this._lastProactiveAt < 60 * 1000) return false; // 1분 간격
+    if (now - this._lastProactiveAt < 5 * 60 * 1000) return false; // 5분 간격 (Gemini 비용 제어)
     // 일 20회 제한
     if (this.dailyProactiveCount >= 100) return false; // 1분 간격이니 넉넉히
     return true;
