@@ -294,6 +294,7 @@ class CognitiveTimer {
   private lastTickMs = Date.now();
   private lastProactiveAt = 0;
   private dailyProactiveCount = 0;
+  private lastProbeHash = "";
 
   constructor(config: CognitiveTimerConfig) {
     this.config = config;
@@ -345,9 +346,12 @@ class CognitiveTimer {
 
       // 3. Severity 높은 결과가 있으면 사용자에게 발송
       const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
-      if (important.length > 0) {
+      // 결과 해시로 중복 발송 방지
+      const probeHash = important.map((r) => `${r.name}:${r.severity}`).join(",");
+      if (important.length > 0 && probeHash !== this.lastProbeHash) {
         const canSend = this.checkRateLimit(now);
         if (canSend) {
+          this.lastProbeHash = probeHash;
           const lines = important.map(
             (r: { name: string; observation: string; severity: number }) =>
               `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
@@ -395,7 +399,8 @@ export default definePluginEntry({
     let costs: CostController;
     let store: StateStore;
     let timer: CognitiveTimer;
-    let lastChatId: string | null = null;
+    // 기본 chatId: OpenClaw config의 allowFrom에서 가져옴
+    let lastChatId: string | null = "8226675889";
 
     // Hook 1: gateway_start — initialize all components
     api.on("gateway_start", async () => {
