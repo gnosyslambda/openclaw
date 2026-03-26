@@ -417,50 +417,24 @@ class CognitiveTimer {
           const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
           const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
-          // === 1단계: Ollama 로컬 모델로 gate 판단 ($0, 1분마다) ===
-          const gatePrompt = `지금: ${timeStr} (서울). 금지: ${suppressedList}.
-너는 사용자의 비서다. 대화 맥락을 보고, 지금 사용자에게 가장 유용한 정보를 웹에서 찾기 위한 검색 키워드를 생성해.
-
-고려할 것:
-- 현재 시각과 상황 (아침→오늘 날씨, 저녁→내일 날씨 등)
-- 사용자가 작업 중인 프로젝트, 관심사
-- 사용자에게 실질적으로 도움되는 정보
-
-검색 키워드만 한 줄로 답해. 설명 없이 키워드만.
-예: "서울 오늘 저녁 날씨 미세먼지"
-예: "lumen-engine github issues 2026"
-예: "AI agent framework 최신 뉴스 2026년 3월"`;
-
-          // 사용자 맥락 추출 (로컬 파일, $0)
-          const userCtx = await this.getUserContext();
-          const fullGatePrompt = userCtx
-            ? `${gatePrompt}\n\n최근 대화 맥락 (사용자가 관심 있는 것):\n${userCtx}`
-            : gatePrompt;
-
-          // Ollama로 맥락 기반 검색 키워드 생성 ($0) — YES/NO gate 제거, 항상 실행
-          console.log("[Lumen] ollama keyword gen ($0, context:", userCtx ? "yes" : "none", ")");
-          const keywordResult = await this.callOllamaGate(fullGatePrompt);
-          const searchHint =
-            keywordResult?.replace(/^(YES|NO)\s*/i, "").trim() || "서울 날씨 주요뉴스";
-          console.log("[Lumen] keywords:", searchHint);
+          // Gemini 직접 탐색 — memory_search + 웹 검색 + 맥락 파악 전부 Gemini가 수행
+          console.log("[Lumen] running Gemini exploration");
+          const recentTopics = [...this.reportedExplorations].join(", ") || "없음";
           {
-            // Gemini 풀 탐색 (웹 검색 + 메시지 생성)
-
-            const recentTopics = [...this.reportedExplorations].join(", ") || "없음";
             const fullPrompt = `지금: ${timeStr} (서울)
 
-memory_search로 사용자 맥락 파악 후, 웹 검색으로 실시간 정보를 찾아.
-검색 키워드: ${searchHint}
+memory_search로 사용자의 관심사와 작업 맥락을 먼저 파악해.
+그 다음, 사용자에게 지금 진짜 도움되는 정보를 웹 검색으로 찾아.
 
-규칙:
-- 친구한테 카톡 보내듯이 써. 딱딱하게 쓰지 마.
-- 구체적 팩트 + 숫자 필수. 뻔한 정보 금지.
-- 이미 보낸 주제는 다시 보내지 마: ${recentTopics}
-- 사용자가 뭔가 할 수 있는 제안 붙여.
-- <final> 같은 태그 절대 쓰지 마. 순수 텍스트만.
-- 날씨 얘기만 하지 마. 다양하게.
-- 진짜 알려줄 게 없으면 "없음".
+절대 규칙:
+- 이미 보낸 주제 다시 보내면 안 됨: [${recentTopics}]
+- 날씨는 이미 보냈어. 날씨 금지.
+- <final> 태그 쓰지 마.
+- 친구한테 카톡하듯이 자연스럽게 써.
+- 진짜 유용하거나 흥미로운 것만. 억지로 쥐어짜지 마.
+- 없으면 "없음". 없는 게 낫다.
 
+좋은 예: 사용자 GitHub 레포 관련 소식, 사용자가 쓰는 기술 관련 업데이트, 재밌는 밈, 충격적 뉴스, 사용자 프로젝트에 도움되는 정보
 금지: ${suppressedList}`;
 
             const result = await this.config.runSubagent(fullPrompt);
@@ -649,7 +623,7 @@ memory_search로 사용자 맥락 파악 후, 웹 검색으로 실시간 정보�
 
   private checkRateLimit(now: number): boolean {
     // 최소 5분 간격
-    if (now - this._lastProactiveAt < 5 * 60 * 1000) return false; // 5분 간격 (Gemini 비용 제어)
+    if (now - this._lastProactiveAt < 30 * 60 * 1000) return false; // 30분 간격
     // 일 20회 제한
     if (this.dailyProactiveCount >= 100) return false; // 1분 간격이니 넉넉히
     return true;
