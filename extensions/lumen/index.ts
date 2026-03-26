@@ -464,7 +464,7 @@ class CognitiveTimer {
 
             if (result && result !== "없음" && !result.startsWith("없음")) {
               this.lastExplorationTopic = result.substring(0, 50);
-              const message = `💡 ${result}\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+              const message = `💡 ${result}`;
               console.log("[Lumen] sending exploration message");
               await this.config.onProactiveMessage(message);
               this._lastProactiveAt = now;
@@ -500,7 +500,7 @@ class CognitiveTimer {
               (r: { name: string; observation: string; severity: number }) =>
                 `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
             );
-            const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+            const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?`;
             console.log("[Lumen] sending probe message:", lines.length, "items");
             await this.config.onProactiveMessage(message);
             // shell probe 발송은 LLM 탐색 rate limit에 영향 안 줌

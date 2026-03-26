@@ -1,15 +1,15 @@
 {
   "drives": {
-    "duty": 0.047142488888888896,
-    "vigilance": 0.017678433333333337,
-    "social": 0.023397596744346598,
-    "curiosity": 1
+    "duty": 0.0032792666666666666,
+    "vigilance": 0.021494975000000027,
+    "social": 0.0016387343055259262,
+    "curiosity": 0.6218319262579778
   },
   "costs": {
-    "todayUsd": 0,
-    "l2Calls": 0,
+    "todayUsd": 0.314979,
+    "l2Calls": 2,
     "l3Calls": 0
   },
   "suppressedTopics": [],
-  "savedAt": "2026-03-26T09:07:10.386Z"
+  "savedAt": "2026-03-26T09:15:18.732Z"
 }
