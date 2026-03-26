@@ -60,6 +60,45 @@ class DriveSystemImpl implements DriveSystem {
     this.state = { ...saved };
   }
 
+  /** 시간 경과에 따른 drive 자연 증가. */
+  tick(elapsedSec: number): void {
+    const capped = Math.min(elapsedSec, 3600);
+    const hours = capped / 3600;
+    const rates: Record<DriveType, number> = {
+      [DriveType.DUTY]: 0.08,
+      [DriveType.VIGILANCE]: 0.03,
+      [DriveType.SOCIAL]: 0.04,
+      [DriveType.CURIOSITY]: 3.0,
+    };
+    for (const key of Object.values(DriveType)) {
+      let rate = rates[key];
+      // Drive interactions: duty/vigilance suppress curiosity
+      if (key === DriveType.CURIOSITY) {
+        rate *= 1 - 0.6 * this.state[DriveType.DUTY];
+        rate *= 1 - 0.4 * this.state[DriveType.VIGILANCE];
+      }
+      if (key === DriveType.SOCIAL) {
+        rate *= 1 - 0.3 * this.state[DriveType.DUTY];
+      }
+      rate = Math.max(0, rate);
+      this.state[key] = Math.min(1, this.state[key] + rate * hours);
+    }
+  }
+
+  /** Drive 수준에 따른 적응적 딜레이 (초). */
+  adaptiveDelay(): number {
+    const max = Math.max(...Object.values(this.state));
+    if (max >= 0.8) return 1;
+    if (max >= 0.5) return 10;
+    if (max >= 0.3) return 30;
+    if (max >= 0.1) return 120;
+    return 300;
+  }
+
+  snapshot(): DriveState {
+    return { ...this.state };
+  }
+
   /** Drive interactions: duty/vigilance suppress curiosity, duty suppresses social. */
   private applyInteractions(): void {
     if (this.state.duty > 0.5) {
@@ -83,9 +122,78 @@ class ProbeRunner {
   }
 
   async runAll(): Promise<ProbeResult[]> {
-    // Placeholder — real probes would inspect the filesystem, git state, etc.
-    this.pendingResults = [];
-    return this.pendingResults;
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+
+    const probes: Array<{
+      name: string;
+      cmd: string;
+      parse: (out: string) => { observation: string; severity: number };
+    }> = [
+      {
+        name: "uncommitted_changes",
+        cmd: "git diff --stat | tail -1",
+        parse: (out) => {
+          if (!out.trim()) return { observation: "uncommitted 변경 없음", severity: 0 };
+          return { observation: `uncommitted: ${out.trim()}`, severity: 0.3 };
+        },
+      },
+      {
+        name: "todo_count",
+        cmd: 'grep -r "TODO\\|FIXME" src/ 2>/dev/null | wc -l',
+        parse: (out) => {
+          const n = parseInt(out.trim()) || 0;
+          if (n === 0) return { observation: "TODO/FIXME 없음", severity: 0 };
+          if (n < 10) return { observation: `TODO/FIXME ${n}개`, severity: 0.2 };
+          return { observation: `TODO/FIXME ${n}개 (많음)`, severity: 0.5 };
+        },
+      },
+      {
+        name: "stale_branches",
+        cmd: "git branch --merged 2>/dev/null | grep -v '\\*\\|main\\|master' | wc -l",
+        parse: (out) => {
+          const n = parseInt(out.trim()) || 0;
+          if (n <= 1) return { observation: "stale branch 없음", severity: 0 };
+          return { observation: `병합 완료 브랜치 ${n}개`, severity: 0.3 };
+        },
+      },
+      {
+        name: "recent_activity",
+        cmd: "git log --since=3days --oneline 2>/dev/null | wc -l",
+        parse: (out) => {
+          const n = parseInt(out.trim()) || 0;
+          if (n === 0) return { observation: "최근 3일 커밋 없음", severity: 0.2 };
+          return { observation: `최근 3일 커밋 ${n}건`, severity: 0 };
+        },
+      },
+      {
+        name: "disk_usage",
+        cmd: "du -sm . 2>/dev/null | cut -f1",
+        parse: (out) => {
+          const mb = parseInt(out.trim()) || 0;
+          if (mb < 500) return { observation: `디스크 ${mb}MB`, severity: 0 };
+          return { observation: `디스크 ${mb}MB (과다)`, severity: 0.4 };
+        },
+      },
+    ];
+
+    const results: ProbeResult[] = [];
+    for (const probe of probes) {
+      try {
+        const { stdout } = await execFileAsync("/bin/sh", ["-c", probe.cmd], {
+          cwd: this.cwd,
+          timeout: 10_000,
+        });
+        const { observation, severity } = probe.parse(stdout);
+        results.push({ name: probe.name, observation, severity, summary: observation });
+      } catch {
+        // probe 실패는 무시
+      }
+    }
+
+    this.pendingResults = results;
+    return results;
   }
 }
 
@@ -181,8 +289,11 @@ interface CognitiveTimerConfig {
 
 class CognitiveTimer {
   private config: CognitiveTimerConfig;
-  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private timerId: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private lastTickMs = Date.now();
+  private lastProactiveAt = 0;
+  private dailyProactiveCount = 0;
 
   constructor(config: CognitiveTimerConfig) {
     this.config = config;
@@ -191,39 +302,83 @@ class CognitiveTimer {
   start(): void {
     if (this.running) return;
     this.running = true;
-    this.tick();
+    this.lastTickMs = Date.now();
+    this.scheduleNext(10_000); // 첫 tick 10초 후
   }
 
   stop(): void {
     this.running = false;
-    if (this.intervalId) {
-      clearTimeout(this.intervalId);
-      this.intervalId = null;
+    if (this.timerId) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
     }
+  }
+
+  private scheduleNext(delayMs: number): void {
+    this.timerId = setTimeout(() => {
+      this.tick().catch((err) => {
+        console.error("[Lumen] tick error:", err);
+        // 에러 나도 다음 tick은 스케줄
+        if (this.running) this.scheduleNext(60_000);
+      });
+    }, delayMs);
   }
 
   private async tick(): Promise<void> {
     if (!this.running) return;
 
-    const state = this.config.drives.getState();
-    const maxDrive = Math.max(state.duty, state.vigilance, state.social, state.curiosity);
+    // 1. Drive 시간 경과 반영
+    const now = Date.now();
+    const elapsedSec = Math.min((now - this.lastTickMs) / 1000, 3600);
+    this.lastTickMs = now;
+    this.config.drives.tick(elapsedSec);
 
-    // Run probes when curiosity is the dominant drive
-    if (state.curiosity >= 0.6 && state.curiosity >= maxDrive) {
-      await this.config.probes.runAll();
+    const state = this.config.drives.getState();
+    console.log(
+      `[Lumen] tick: duty=${state.duty.toFixed(2)} vig=${state.vigilance.toFixed(2)} soc=${state.social.toFixed(2)} cur=${state.curiosity.toFixed(2)} elapsed=${elapsedSec.toFixed(0)}s`,
+    );
+
+    // 2. Curiosity가 올라가면 probe 실행
+    if (state.curiosity > 0.1 && state.duty < 0.5 && state.vigilance < 0.5) {
+      console.log("[Lumen] running probes (curiosity triggered)");
+      const results = await this.config.probes.runAll();
+
+      // 3. Severity 높은 결과가 있으면 사용자에게 발송
+      const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
+      if (important.length > 0) {
+        const canSend = this.checkRateLimit(now);
+        if (canSend) {
+          const lines = important.map(
+            (r: { name: string; observation: string; severity: number }) =>
+              `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
+          );
+          const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+          console.log("[Lumen] sending proactive message:", lines.length, "items");
+          await this.config.onProactiveMessage(message);
+          this.lastProactiveAt = now;
+          this.dailyProactiveCount++;
+          this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
+          this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
+        }
+      }
     }
 
-    // Adaptive delay based on drive pressure
-    const delayMs = this.computeDelay(maxDrive);
-    this.intervalId = setTimeout(() => this.tick(), delayMs);
+    // 4. State 저장
+    await this.config.stateStore.save();
+
+    // 5. 다음 tick 스케줄 (adaptive delay)
+    if (this.running) {
+      const delayMs = this.config.drives.adaptiveDelay() * 1000;
+      this.scheduleNext(delayMs);
+    }
   }
 
-  private computeDelay(maxDrive: number): number {
-    if (maxDrive >= 0.8) return 1_000;
-    if (maxDrive >= 0.5) return 10_000;
-    if (maxDrive >= 0.3) return 30_000;
-    if (maxDrive >= 0.1) return 120_000;
-    return 300_000;
+  private checkRateLimit(now: number): boolean {
+    // 최소 5분 간격
+    if (now - this.lastProactiveAt < 5 * 60 * 1000) return false;
+    // 일 20회 제한
+    if (this.dailyProactiveCount >= 20) return false;
+    return true;
   }
 }
 
