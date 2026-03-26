@@ -573,7 +573,7 @@ YES 또는 NO로 시작. YES면 검색 키워드 한 줄 추가.`;
           stream: false,
           options: { num_predict: 100, temperature: 0.3 },
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(60_000), // 32B 모델 첫 로딩 시간 고려
       });
       if (!resp.ok) return null;
       const data = (await resp.json()) as { response?: string };
