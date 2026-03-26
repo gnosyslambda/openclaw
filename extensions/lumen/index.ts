@@ -415,12 +415,21 @@ class CognitiveTimer {
           const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
           const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
-          // === 1단계: Ollama 로컬 모델로 gate 판단 ($0) ===
-          const gatePrompt = `지금: ${timeStr} (서울). 금지 주제: ${suppressedList}.
-지금 이 시각에 사용자에게 알릴 만한 것이 있을지 판단해.
-예: 비/눈 예보, 미세먼지, 대형 뉴스, 주가 급변, 중요 이벤트, 흥미로운 소식 등.
-평범한 하루라면 NO. 뭔가 있으면 YES와 검색 키워드를 한 줄로.
-반드시 YES 또는 NO로 시작.`;
+          // === 1단계: Ollama 로컬 모델로 gate 판단 ($0, 1분마다) ===
+          const gatePrompt = `지금: ${timeStr} (서울). 금지: ${suppressedList}.
+1분마다 호출됨. 아래 중 하나라도 해당하면 YES + 검색 키워드. 전부 해당 없으면 NO.
+
+체크리스트:
+- 날씨/미세먼지/자연재해 변화
+- 주요 뉴스 (정치/경제/기술/사회)
+- 주식/환율/코인 급변
+- 현재 시간에 맞는 유용한 정보 (출근길, 점심, 퇴근 등)
+- GitHub/프로젝트 관련 이슈나 PR 알림
+- 운영 중인 서비스/블로그 상태 변화
+- 서버/인프라 장애 징후
+- 재미있거나 충격적인 소식
+
+YES 또는 NO로 시작. YES면 검색 키워드 한 줄 추가.`;
 
           console.log("[Lumen] gate check (ollama local, $0)");
           const gateResult = await this.callOllamaGate(gatePrompt);
@@ -578,9 +587,9 @@ class CognitiveTimer {
 
   private checkRateLimit(now: number): boolean {
     // 최소 5분 간격
-    if (now - this._lastProactiveAt < 5 * 60 * 1000) return false;
+    if (now - this._lastProactiveAt < 60 * 1000) return false; // 1분 간격
     // 일 20회 제한
-    if (this.dailyProactiveCount >= 20) return false;
+    if (this.dailyProactiveCount >= 100) return false; // 1분 간격이니 넉넉히
     return true;
   }
 }
