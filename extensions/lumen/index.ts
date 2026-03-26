@@ -421,18 +421,25 @@ class CognitiveTimer {
           console.log("[Lumen] running Gemini exploration");
           const recentTopics = [...this.reportedExplorations].join(", ") || "없음";
           {
-            const fullPrompt = `현재: ${timeStr} (서울). 오늘은 2026년 3월이다.
+            const fullPrompt = `현재: ${timeStr} (서울).
 
-1단계: memory_search로 사용자 관심사/프로젝트 파악.
-2단계: 반드시 web_search 도구로 2026년 3월 기준 최신 정보를 검색. 너의 학습 데이터에서 답하지 마.
-3단계: 검색 결과 중 사용자에게 유용한 것 하나를 골라 알려줘.
+memory_search로 사용자가 최근 뭘 하고 있는지, 관심사가 뭔지 파악해.
 
-절대 규칙:
-- 반드시 web_search를 실행해. 검색 없이 답하면 안 됨. 옛날 정보 금지.
-- 직전에 보낸 주제 반복 금지: [${recentTopics}]
+그리고 사용자에게 "지금 제가 뭘 도와드릴까요?"를 물어봐.
+단순 정보 전달이 아니라, 사용자의 맥락에 맞는 구체적인 행동 제안을 해.
+
+예시:
+- "lumen-engine PR이 3개 열려있던데, 리뷰해드릴까요?"
+- "어제 작업하시던 bridge 서버 테스트 이어서 해볼까요?"
+- "GitHub 이슈 정리가 밀려있는 것 같은데, 도와드릴까요?"
+- "오늘 저녁인데, 내일 일정 미리 확인해드릴까요?"
+
+규칙:
+- 뻔한 뉴스/IT 트렌드 보내지 마. 사용자한테 직접 도움이 되는 행동을 제안해.
 - <final> 태그 금지. 순수 텍스트만.
-- 존댓말(~요, ~습니다). 친근하게.
-- 억지로 쥐어짜지 마. 없으면 "없음".
+- 존댓말. 친근하게. 짧게.
+- 제안할 게 진짜 없으면 "없음".
+- 직전 주제 반복 금지: [${recentTopics}]
 
 금지: ${suppressedList}`;
 
