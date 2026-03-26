@@ -409,10 +409,7 @@ class CognitiveTimer {
 
       // 2. Curiosity 기반 LLM 자율 탐색
       if (state.curiosity > 0.1 && state.duty < 0.5 && state.vigilance < 0.5) {
-        const userActive = await this.isUserActiveLocally();
-        if (userActive) {
-          console.log("[Lumen] user active locally — skipping exploration");
-        } else if (!this.checkRateLimit(now)) {
+        if (!this.checkRateLimit(now)) {
           console.log("[Lumen] rate limit — skipping exploration");
         } else {
           console.log("[Lumen] running LLM autonomous exploration (curiosity triggered)");
@@ -613,7 +610,7 @@ export default definePluginEntry({
             const { runId } = await api.runtime.subagent.run({
               sessionKey,
               message: prompt,
-              model: "gemini-2.5-flash",
+              idempotencyKey: `lumen-explore-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             });
             const waitResult = await api.runtime.subagent.waitForRun({ runId, timeoutMs: 30000 });
             if (waitResult.status !== "ok") {
