@@ -1,0 +1,14 @@
+{
+  "id": "lumen",
+  "kind": "extension",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "dailyBudget": { "type": "number", "default": 1.0 },
+      "l3DailyLimit": { "type": "number", "default": 20 },
+      "probeEnabled": { "type": "boolean", "default": true },
+      "proactiveEnabled": { "type": "boolean", "default": true },
+      "defaultChatId": { "type": "string" }
+    }
+  }
+}
