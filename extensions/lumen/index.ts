@@ -285,6 +285,7 @@ interface CognitiveTimerConfig {
   costs: CostController;
   stateStore: StateStore;
   onProactiveMessage: (message: string) => Promise<void>;
+  runSubagent: (prompt: string) => Promise<string | null>;
 }
 
 class CognitiveTimer {
@@ -296,9 +297,32 @@ class CognitiveTimer {
   private dailyProactiveCount = 0;
   /** 이미 보고한 probe 이름 — 상태가 해결될 때까지 재보고하지 않음 */
   private reportedProbes = new Set<string>();
+  /** 사용자가 "ㄴㄴ" 등으로 관심없다고 한 주제 */
+  private suppressedTopics = new Set<string>();
+  /** 마지막으로 보낸 탐색 주제 (ㄴㄴ 매칭용) */
+  private lastExplorationTopic = "";
+  /** 마지막 shell probe 실행 시각 */
+  private lastShellProbeAt = 0;
 
   constructor(config: CognitiveTimerConfig) {
     this.config = config;
+  }
+
+  /** 특정 주제를 탐색 금지 목록에 추가 */
+  suppressTopic(keyword: string): void {
+    this.suppressedTopics.add(keyword.toLowerCase());
+    console.log(`[Lumen] topic suppressed: ${keyword}`);
+  }
+
+  /** 모든 억제된 주제를 해제 */
+  clearSuppressed(): void {
+    this.suppressedTopics.clear();
+    console.log("[Lumen] all suppressed topics cleared");
+  }
+
+  /** 마지막으로 탐색한 주제 */
+  get lastTopic(): string {
+    return this.lastExplorationTopic;
   }
 
   start(): void {
@@ -340,46 +364,98 @@ class CognitiveTimer {
       `[Lumen] tick: duty=${state.duty.toFixed(2)} vig=${state.vigilance.toFixed(2)} soc=${state.social.toFixed(2)} cur=${state.curiosity.toFixed(2)} elapsed=${elapsedSec.toFixed(0)}s`,
     );
 
-    // 2. Curiosity가 올라가면 probe 실행
+    // 2. Curiosity 기반 LLM 자율 탐색
     if (state.curiosity > 0.1 && state.duty < 0.5 && state.vigilance < 0.5) {
-      console.log("[Lumen] running probes (curiosity triggered)");
+      const userActive = await this.isUserActiveLocally();
+      if (userActive) {
+        console.log("[Lumen] user active locally — skipping exploration");
+      } else if (!this.checkRateLimit(now)) {
+        console.log("[Lumen] rate limit — skipping exploration");
+      } else {
+        console.log("[Lumen] running LLM autonomous exploration (curiosity triggered)");
+
+        const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
+        const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+
+        const prompt = `지금 시각: ${timeStr}
+
+너는 사용자의 자율 비서다. 사용자에게 지금 알려주면 좋을 만한 정보를 하나 찾아서 알려줘.
+
+예시 (이것만 하라는 게 아니라, 자유롭게 판단해):
+- 오늘 날씨나 미세먼지 상태
+- 관심 가질 만한 IT/AI 뉴스
+- 환율이나 주요 지표 변동
+- 오늘 일정 리마인더
+- 사용자가 최근 작업하던 프로젝트 관련 유용한 정보
+
+금지 주제 (사용자가 관심없다고 한 것): ${suppressedList}
+
+규칙:
+- 한국어로 자연스럽게 대화체로 작성
+- 2~3문장으로 짧게
+- 진짜 유용한 것만. 뻔한 정보는 "없음"이라고 답해
+- 코드 관련 probe(TODO, 디스크 등)는 하지 마 — 그건 별도로 처리됨
+- 응답이 "없음"이면 메시지를 보내지 않음`;
+
+        const result = await this.config.runSubagent(prompt);
+
+        if (result && result !== "없음" && !result.startsWith("없음")) {
+          this.lastExplorationTopic = result.substring(0, 50);
+          const message = `💡 ${result}\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+          console.log("[Lumen] sending exploration message");
+          await this.config.onProactiveMessage(message);
+          this.lastProactiveAt = now;
+          this.dailyProactiveCount++;
+          this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
+          this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
+        } else {
+          console.log("[Lumen] LLM exploration returned nothing useful");
+        }
+      }
+    }
+
+    // 3. Shell probes (코드 관련) — 1시간에 한 번만 실행
+    const oneHourMs = 60 * 60 * 1000;
+    if (now - this.lastShellProbeAt >= oneHourMs) {
+      console.log("[Lumen] running hourly shell probes");
+      this.lastShellProbeAt = now;
       const results = await this.config.probes.runAll();
 
-      // 3. Severity 높은 결과가 있으면 사용자에게 발송
       const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
-      // 해결된 항목은 추적 해제 (다음에 재발하면 다시 보고)
       const currentNames = new Set(important.map((r) => r.name));
       for (const name of this.reportedProbes) {
         if (!currentNames.has(name)) this.reportedProbes.delete(name);
       }
-      // 이미 보고한 항목 제외 — probe name 기준으로 추적
       const newFindings = important.filter((r) => !this.reportedProbes.has(r.name));
-      const userActive = await this.isUserActiveLocally();
-      if (userActive) {
-        console.log("[Lumen] user active locally — skipping proactive message");
-      }
-      if (newFindings.length > 0 && !userActive) {
-        const canSend = this.checkRateLimit(now);
-        if (canSend) {
-          // 보고한 probe 이름 기록
+
+      if (newFindings.length > 0) {
+        const userActive = await this.isUserActiveLocally();
+        if (!userActive && this.checkRateLimit(now)) {
           for (const r of newFindings) this.reportedProbes.add(r.name);
           const lines = newFindings.map(
             (r: { name: string; observation: string; severity: number }) =>
               `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
           );
           const message = `🔍 환경 점검 결과:\n\n${lines.join("\n")}\n\n확인이 필요해 보이는 항목이 있어요. 살펴볼까요?\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
-          console.log("[Lumen] sending proactive message:", lines.length, "items");
+          console.log("[Lumen] sending probe message:", lines.length, "items");
           await this.config.onProactiveMessage(message);
           this.lastProactiveAt = now;
           this.dailyProactiveCount++;
-          this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
-          this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
+          this.config.drives.satisfy(DriveType.CURIOSITY, 0.2);
         }
       }
     }
 
     // 4. State 저장
-    await this.config.stateStore.save();
+    this.config.stateStore.save({
+      drives: this.config.drives.getState(),
+      costs: {
+        todayUsd: this.config.costs.getSummary().todayUsd,
+        l2Calls: this.config.costs.getSummary().l2Calls,
+        l3Calls: this.config.costs.getSummary().l3Calls,
+      },
+      savedAt: new Date().toISOString(),
+    });
 
     // 5. 다음 tick 스케줄 (adaptive delay)
     if (this.running) {
@@ -424,6 +500,24 @@ class CognitiveTimer {
   }
 }
 
+// ─── User Feedback Detection Patterns ───────────────────────────────
+
+const REJECTION_PATTERNS = [
+  /^ㄴㄴ$/,
+  /^노노$/,
+  /^ㄴ$/,
+  /관심\s*없/,
+  /그만/,
+  /필요\s*없/,
+  /보내지\s*마/,
+  /알림\s*끄/,
+  /됐어/,
+  /싫어/,
+  /별로/,
+];
+
+const UNSUPPRESS_PATTERNS = [/다시\s*(보내|알려)/, /알림\s*(켜|다시)/, /복구/];
+
 // ─── Plugin Entry ───────────────────────────────────────────────────
 
 export default definePluginEntry({
@@ -464,6 +558,31 @@ export default definePluginEntry({
           if (lastChatId) {
             await api.runtime.channel.telegram.sendMessageTelegram(lastChatId, message, {});
             drives.satisfy(DriveType.SOCIAL, 0.5);
+          }
+        },
+        runSubagent: async (prompt: string) => {
+          try {
+            const sessionKey = `agent:main:lumen-explore`;
+            const { runId } = await api.runtime.subagent.run({
+              sessionKey,
+              message: prompt,
+              model: "gemini-2.5-flash",
+            });
+            const waitResult = await api.runtime.subagent.waitForRun({ runId, timeoutMs: 30000 });
+            if (waitResult.status !== "ok") return null;
+            const { messages } = await api.runtime.subagent.getSessionMessages({
+              sessionKey,
+              limit: 1,
+            });
+            const last = messages[messages.length - 1];
+            if (last && typeof last === "object" && "content" in (last as any)) {
+              return String((last as any).content);
+            }
+            if (typeof last === "string") return last;
+            return null;
+          } catch (err) {
+            console.error("[Lumen] subagent exploration failed:", err);
+            return null;
           }
         },
       });
@@ -512,7 +631,7 @@ export default definePluginEntry({
       return { modelOverride: "gemini-2.5-flash" };
     });
 
-    // Hook 5: message_received — stimulate drives on user input
+    // Hook 5: message_received — stimulate drives on user input + feedback detection
     api.on("message_received", async (event, _ctx) => {
       drives.beginCycle();
       drives.stimulate(DriveType.SOCIAL, 0.7);
@@ -521,6 +640,38 @@ export default definePluginEntry({
       // Cache chat ID for proactive messaging
       if (event.from) {
         lastChatId = event.from;
+      }
+
+      // Check if user is rejecting the last proactive topic
+      const messageText = String(event.content || event.text || "").trim();
+      const isRejection = REJECTION_PATTERNS.some((p) => p.test(messageText));
+
+      if (isRejection && timer) {
+        const lastTopic = timer.lastTopic;
+        if (lastTopic) {
+          timer.suppressTopic(lastTopic);
+          // Send acknowledgment
+          if (lastChatId) {
+            await api.runtime.channel.telegram.sendMessageTelegram(
+              lastChatId,
+              `알겠어요, "${lastTopic}" 관련 알림은 더 이상 보내지 않을게요 👍`,
+              {},
+            );
+          }
+        }
+      }
+
+      // Check if user wants to re-enable suppressed topics
+      const isUnsuppress = UNSUPPRESS_PATTERNS.some((p) => p.test(messageText));
+      if (isUnsuppress && timer) {
+        timer.clearSuppressed();
+        if (lastChatId) {
+          await api.runtime.channel.telegram.sendMessageTelegram(
+            lastChatId,
+            "알겠어요, 모든 알림을 다시 보내드릴게요 🔔",
+            {},
+          );
+        }
       }
     });
 
