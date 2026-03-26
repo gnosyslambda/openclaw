@@ -115,7 +115,7 @@ class DriveSystemImpl implements DriveSystem {
 
 class ProbeRunner {
   pendingResults: ProbeResult[] = [];
-  private cwd: string;
+  readonly cwd: string;
 
   constructor(cwd: string) {
     this.cwd = cwd;
@@ -348,7 +348,11 @@ class CognitiveTimer {
       const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
       // 결과 해시로 중복 발송 방지
       const probeHash = important.map((r) => `${r.name}:${r.severity}`).join(",");
-      if (important.length > 0 && probeHash !== this.lastProbeHash) {
+      const userActive = await this.isUserActiveLocally();
+      if (userActive) {
+        console.log("[Lumen] user active locally — skipping proactive message");
+      }
+      if (important.length > 0 && probeHash !== this.lastProbeHash && !userActive) {
         const canSend = this.checkRateLimit(now);
         if (canSend) {
           this.lastProbeHash = probeHash;
@@ -375,6 +379,33 @@ class CognitiveTimer {
       const delayMs = this.config.drives.adaptiveDelay() * 1000;
       this.scheduleNext(delayMs);
     }
+  }
+
+  /** 최근 5분 내 로컬 파일 수정이 있으면 사용자가 작업 중으로 판단. */
+  private async isUserActiveLocally(): Promise<boolean> {
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+      // 최근 5분 내 수정된 소스 파일이 있는지 체크
+      const { stdout } = await execFileAsync(
+        "/bin/sh",
+        [
+          "-c",
+          'find . -name "*.ts" -o -name "*.py" -o -name "*.js" -o -name "*.json" | head -200 | xargs stat -f "%m %N" 2>/dev/null | sort -rn | head -1',
+        ],
+        { cwd: this.config.probes.cwd, timeout: 5000 },
+      );
+      const parts = stdout.trim().split(" ");
+      if (parts.length >= 1) {
+        const lastModified = parseInt(parts[0], 10);
+        const fiveMinAgo = Math.floor(Date.now() / 1000) - 300;
+        return lastModified > fiveMinAgo;
+      }
+    } catch {
+      // 실패하면 활동 중이 아닌 걸로 간주
+    }
+    return false;
   }
 
   private checkRateLimit(now: number): boolean {
