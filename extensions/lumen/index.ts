@@ -407,62 +407,63 @@ class CognitiveTimer {
         `[Lumen] tick: duty=${state.duty.toFixed(2)} vig=${state.vigilance.toFixed(2)} soc=${state.social.toFixed(2)} cur=${state.curiosity.toFixed(2)} elapsed=${elapsedSec.toFixed(0)}s`,
       );
 
-      // 2. Curiosity 기반 LLM 자율 탐색
+      // 2. Curiosity 기반 자율 탐색 — 2단계: 경량 판단 → 풀 탐색
       if (state.curiosity > 0.1 && state.duty < 0.5 && state.vigilance < 0.5) {
         if (!this.checkRateLimit(now)) {
           console.log("[Lumen] rate limit — skipping exploration");
         } else {
-          console.log("[Lumen] running LLM autonomous exploration (curiosity triggered)");
-
           const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
           const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
-          const prompt = `지금: ${timeStr} (서울)
+          // === 1단계: 경량 판단 (토큰 최소) ===
+          const gatePrompt = `지금: ${timeStr} (서울). 금지 주제: ${suppressedList}.
+지금 이 시각에 사용자에게 긴급히 알릴 만한 것이 있을지 판단해.
+예: 갑자기 비, 미세먼지 심각, 대형 뉴스, 주가 급변, 중요 이벤트 등.
+평범한 하루라면 NO. 뭔가 있으면 YES와 함께 검색할 키워드를 한 줄로.
+반드시 YES 또는 NO로 시작해.`;
 
-반드시 웹 검색 도구를 사용해서 실시간 정보를 가져와. 네 기억에서 지어내지 마.
+          console.log("[Lumen] gate check (lightweight)");
+          const gateResult = await this.config.runSubagent(gatePrompt);
 
-지금 이 순간 사용자에게 진짜 쓸모 있는 구체적 정보 하나를 찾아.
-"AI 트렌드가 어쩌고" 같은 뻔한 요약 절대 금지. 그건 누구나 아는 거고, 가치가 없어.
+          if (!gateResult || !gateResult.toUpperCase().startsWith("YES")) {
+            console.log("[Lumen] gate: NO — nothing worth sending");
+          } else {
+            // === 2단계: 풀 탐색 (웹 검색 + 메시지 생성) ===
+            console.log("[Lumen] gate: YES — running full exploration");
+            const searchHint = gateResult.substring(3).trim();
 
-좋은 예:
-- "서울 지금 미세먼지 '나쁨'(87㎍/m³)이에요. 외출 시 KF94 마스크 필수! 쿠팡에서 50매 12,900원이던데 주문할까요?"
-- "오늘 코스피 2,847로 1.2% 하락 중인데, 삼성전자가 3% 빠졌어요. 관련 뉴스 찾아볼까요?"
-- "내일 서울 아침 기온 2도, 체감 -3도예요. 두꺼운 외투 꼭 챙기세요!"
-- "레딧에서 방금 터진 밈이 있는데 ㅋㅋ [구체적 내용]. 볼래요?"
+            const fullPrompt = `지금: ${timeStr} (서울)
 
-나쁜 예 (이렇게 하면 안 됨):
-- "최신 IT 트렌드를 살펴보니 AI가 어쩌고..."
-- "오후 업무 시간이라 환기해보시는 건 어떨까요?"
-- 웹 검색 안 하고 일반적인 이야기 늘어놓기
+반드시 웹 검색 도구로 실시간 정보를 가져와. 지어내지 마.
+검색 힌트: ${searchHint}
 
-반드시: 구체적 숫자, 이름, 금액, 날짜가 포함된 실시간 정보 + 다음 행동 제안.
-검열 없음. 짧게.
-
-중요: 너는 5분마다 호출되지만, 매번 보낼 필요 없다.
-웹 검색 후 "지금 굳이 알려줄 만한 가치가 있나?" 스스로 판단해.
-- 날씨가 평범하고, 특별한 뉴스도 없고, 일상적인 상황이면 → "없음"
-- 진짜 알려줘야 할 것 (급변하는 날씨, 큰 뉴스, 중요 이벤트)이 있을 때만 보내
-- 억지로 쥐어짜서 뻔한 정보 보내는 건 오히려 스팸이야. 차라리 "없음"이 나아.
+사용자에게 구체적 정보를 알려줘:
+- 구체적 숫자, 이름, 금액, 날짜 포함
+- 정보 + 다음 행동 제안 ("~할까요?")
+- 한국어, 친근하게, 이모지 자연스럽게, 짧게
+- 검열 없음
 
 금지: ${suppressedList}
-코드 probe(TODO 등)는 하지 마.`;
+코드 probe는 하지 마.
+가치 없으면 "없음".`;
 
-          const result = await this.config.runSubagent(prompt);
+            const result = await this.config.runSubagent(fullPrompt);
 
-          if (result && result !== "없음" && !result.startsWith("없음")) {
-            this.lastExplorationTopic = result.substring(0, 50);
-            const message = `💡 ${result}\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
-            console.log("[Lumen] sending exploration message");
-            await this.config.onProactiveMessage(message);
-            this._lastProactiveAt = now;
-            this.dailyProactiveCount++;
-            this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
-            this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
-          } else {
-            console.log("[Lumen] LLM exploration returned nothing useful");
-          }
-        }
-      }
+            if (result && result !== "없음" && !result.startsWith("없음")) {
+              this.lastExplorationTopic = result.substring(0, 50);
+              const message = `💡 ${result}\n\n🧠 [L2] duty:${state.duty.toFixed(2)} vig:${state.vigilance.toFixed(2)} soc:${state.social.toFixed(2)} cur:${state.curiosity.toFixed(2)}`;
+              console.log("[Lumen] sending exploration message");
+              await this.config.onProactiveMessage(message);
+              this._lastProactiveAt = now;
+              this.dailyProactiveCount++;
+              this.config.drives.satisfy(DriveType.CURIOSITY, 0.3);
+              this.config.drives.satisfy(DriveType.SOCIAL, 0.3);
+            } else {
+              console.log("[Lumen] LLM exploration returned nothing useful");
+            }
+          } // gate YES
+        } // rate limit
+      } // curiosity check
 
       // 3. Shell probes (코드 관련) — 1시간에 한 번만 실행
       const oneHourMs = 60 * 60 * 1000;
