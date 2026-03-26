@@ -294,7 +294,8 @@ class CognitiveTimer {
   private lastTickMs = Date.now();
   private lastProactiveAt = 0;
   private dailyProactiveCount = 0;
-  private lastProbeHash = "";
+  /** 이미 보고한 probe 이름 — 상태가 해결될 때까지 재보고하지 않음 */
+  private reportedProbes = new Set<string>();
 
   constructor(config: CognitiveTimerConfig) {
     this.config = config;
@@ -346,17 +347,23 @@ class CognitiveTimer {
 
       // 3. Severity 높은 결과가 있으면 사용자에게 발송
       const important = results.filter((r: { severity: number }) => r.severity >= 0.2);
-      // 결과 해시로 중복 발송 방지
-      const probeHash = important.map((r) => `${r.name}:${r.severity}`).join(",");
+      // 해결된 항목은 추적 해제 (다음에 재발하면 다시 보고)
+      const currentNames = new Set(important.map((r) => r.name));
+      for (const name of this.reportedProbes) {
+        if (!currentNames.has(name)) this.reportedProbes.delete(name);
+      }
+      // 이미 보고한 항목 제외 — probe name 기준으로 추적
+      const newFindings = important.filter((r) => !this.reportedProbes.has(r.name));
       const userActive = await this.isUserActiveLocally();
       if (userActive) {
         console.log("[Lumen] user active locally — skipping proactive message");
       }
-      if (important.length > 0 && probeHash !== this.lastProbeHash && !userActive) {
+      if (newFindings.length > 0 && !userActive) {
         const canSend = this.checkRateLimit(now);
         if (canSend) {
-          this.lastProbeHash = probeHash;
-          const lines = important.map(
+          // 보고한 probe 이름 기록
+          for (const r of newFindings) this.reportedProbes.add(r.name);
+          const lines = newFindings.map(
             (r: { name: string; observation: string; severity: number }) =>
               `• [${r.name}] ${r.observation} (심각도: ${(r.severity * 100).toFixed(0)}%)`,
           );
