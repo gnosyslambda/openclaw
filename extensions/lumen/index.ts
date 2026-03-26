@@ -304,9 +304,9 @@ export default definePluginEntry({
       const level = evaluateThinkLevel(drives);
       const actual = costs.downgradeLevel(level);
       if (actual === "L3") {
-        return { modelOverride: "google/gemini-3-pro" };
+        return { modelOverride: "gemini-3-pro" };
       }
-      return { modelOverride: "google/gemini-2.5-flash" };
+      return { modelOverride: "gemini-2.5-flash" };
     });
 
     // Hook 5: message_received — stimulate drives on user input

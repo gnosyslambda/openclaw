@@ -2,7 +2,7 @@
   "drives": {
     "duty": 0,
     "vigilance": 0,
-    "social": 0,
+    "social": 0.5,
     "curiosity": 0
   },
   "costs": {
@@ -10,5 +10,5 @@
     "l2Calls": 7,
     "l3Calls": 0
   },
-  "savedAt": "2026-03-26T04:11:46.581Z"
+  "savedAt": "2026-03-26T04:14:55.993Z"
 }
