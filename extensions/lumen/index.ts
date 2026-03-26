@@ -431,8 +431,18 @@ NO 조건:
 
 YES 또는 NO로 시작.`;
 
-          console.log("[Lumen] gate check (ollama local, $0)");
-          const gateResult = await this.callOllamaGate(gatePrompt);
+          // 사용자 맥락 추출 (로컬 파일, $0)
+          const userCtx = await this.getUserContext();
+          const fullGatePrompt = userCtx
+            ? `${gatePrompt}\n\n최근 대화 맥락 (사용자가 관심 있는 것):\n${userCtx}`
+            : gatePrompt;
+
+          console.log(
+            "[Lumen] gate check (ollama local, $0, context:",
+            userCtx ? "yes" : "none",
+            ")",
+          );
+          const gateResult = await this.callOllamaGate(fullGatePrompt);
 
           if (!gateResult || !gateResult.toUpperCase().startsWith("YES")) {
             console.log("[Lumen] gate: NO — nothing worth sending");
@@ -562,6 +572,53 @@ YES 또는 NO로 시작.`;
     return false;
   }
 
+  /** 최근 대화에서 사용자 맥락 추출 ($0, 로컬 파일 읽기). */
+  private async getUserContext(): Promise<string> {
+    try {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      const sessDir = path.join(process.env.HOME || "~", ".openclaw/agents/main/sessions");
+      // 가장 최근 세션 파일 찾기
+      const files = fs
+        .readdirSync(sessDir)
+        .filter((f: string) => f.endsWith(".jsonl"))
+        .map((f: string) => ({
+          name: f,
+          mtime: fs.statSync(path.join(sessDir, f)).mtimeMs,
+        }))
+        .sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
+
+      if (files.length === 0) return "";
+
+      // 최근 세션에서 user/assistant 메시지 추출 (마지막 10개)
+      const content = fs.readFileSync(path.join(sessDir, files[0].name), "utf-8");
+      const lines = content.trim().split("\n").slice(-50);
+      const messages: string[] = [];
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          const role = entry?.message?.role;
+          if (role === "user" || role === "assistant") {
+            const text = Array.isArray(entry.message.content)
+              ? entry.message.content
+                  .filter((c: any) => c?.type === "text")
+                  .map((c: any) => c.text)
+                  .join("")
+              : String(entry.message.content || "");
+            // 짧게 요약
+            const trimmed = text.replace(/<[^>]+>/g, "").substring(0, 150);
+            if (trimmed) messages.push(`${role}: ${trimmed}`);
+          }
+        } catch {
+          /* skip malformed lines */
+        }
+      }
+      return messages.slice(-10).join("\n");
+    } catch {
+      return "";
+    }
+  }
+
   /** Ollama 로컬 모델로 gate 판단 — 완전 무료 ($0). */
   private async callOllamaGate(prompt: string): Promise<string | null> {
     try {
@@ -572,7 +629,7 @@ YES 또는 NO로 시작.`;
           model: "qwen2.5-coder:32b",
           prompt,
           stream: false,
-          options: { num_predict: 100, temperature: 0.3 },
+          options: { num_predict: 200, temperature: 0.3 },
         }),
         signal: AbortSignal.timeout(60_000), // 32B 모델 첫 로딩 시간 고려
       });
