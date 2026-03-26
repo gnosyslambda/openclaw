@@ -246,7 +246,12 @@ class CostController {
     return requested;
   }
 
-  restore(saved: { todayUsd: number; l2Calls: number; l3Calls: number }): void {
+  restore(saved: { todayUsd: number; l2Calls: number; l3Calls: number }, savedAt?: string): void {
+    // 날짜가 바뀌었으면 어제 비용은 무시
+    if (savedAt) {
+      const savedDate = new Date(savedAt).toDateString();
+      if (savedDate !== new Date().toDateString()) return;
+    }
     this.todayUsd = saved.todayUsd;
     this.l2Calls = saved.l2Calls;
     this.l3Calls = saved.l3Calls;
@@ -304,6 +309,7 @@ class CognitiveTimer {
   private config: CognitiveTimerConfig;
   private timerId: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private ticking = false; // concurrency guard
   private lastTickMs = Date.now();
   private _lastProactiveAt = 0;
   private dailyProactiveCount = 0;
@@ -326,6 +332,11 @@ class CognitiveTimer {
   suppressTopic(keyword: string): void {
     this.suppressedTopics.add(keyword.toLowerCase());
     console.log(`[Lumen] topic suppressed: ${keyword}`);
+  }
+
+  /** 억제된 주제 Set 접근자 */
+  get suppressedTopicsSet(): Set<string> {
+    return this.suppressedTopics;
   }
 
   /** 저장된 억제 주제 복원 */
@@ -368,14 +379,14 @@ class CognitiveTimer {
     this.timerId = setTimeout(() => {
       this.tick().catch((err) => {
         console.error("[Lumen] tick error:", err);
-        // 에러 나도 다음 tick은 스케줄
-        if (this.running) this.scheduleNext(60_000);
+        // scheduleNext는 tick()의 finally에서 처리 — 여기서 호출하면 이중 스케줄링
       });
     }, delayMs);
   }
 
   private async tick(): Promise<void> {
-    if (!this.running) return;
+    if (!this.running || this.ticking) return;
+    this.ticking = true;
     const now = Date.now();
     try {
       // 0. 일일 카운터 리셋
@@ -487,6 +498,7 @@ class CognitiveTimer {
       }
 
       // 5. 다음 tick 스케줄 (adaptive delay)
+      this.ticking = false;
       if (this.running) {
         const delayMs = this.config.drives.adaptiveDelay() * 1000;
         this.scheduleNext(delayMs);
@@ -570,7 +582,7 @@ export default definePluginEntry({
       const saved = store.load();
       if (saved) {
         drives.restore(saved.drives);
-        costs.restore(saved.costs);
+        costs.restore(saved.costs, saved.savedAt);
       }
 
       // Start the adaptive cognitive timer
@@ -626,12 +638,13 @@ export default definePluginEntry({
     api.on("gateway_stop", async () => {
       timer?.stop();
       store?.save({
-        drives: drives.getState(),
+        drives: drives?.getState() ?? { duty: 0, vigilance: 0, social: 0, curiosity: 0 },
         costs: {
-          todayUsd: costs.getSummary().todayUsd,
-          l2Calls: costs.getSummary().l2Calls,
-          l3Calls: costs.getSummary().l3Calls,
+          todayUsd: costs?.getSummary().todayUsd ?? 0,
+          l2Calls: costs?.getSummary().l2Calls ?? 0,
+          l3Calls: costs?.getSummary().l3Calls ?? 0,
         },
+        suppressedTopics: timer ? [...timer.suppressedTopicsSet] : [],
         savedAt: new Date().toISOString(),
       });
       api.logger.info("Lumen cognitive engine stopped, state persisted");
