@@ -415,15 +415,15 @@ class CognitiveTimer {
           const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
           const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
-          // === 1단계: 경량 판단 (토큰 최소) ===
+          // === 1단계: Ollama 로컬 모델로 gate 판단 ($0) ===
           const gatePrompt = `지금: ${timeStr} (서울). 금지 주제: ${suppressedList}.
-지금 이 시각에 사용자에게 긴급히 알릴 만한 것이 있을지 판단해.
-예: 갑자기 비, 미세먼지 심각, 대형 뉴스, 주가 급변, 중요 이벤트 등.
-평범한 하루라면 NO. 뭔가 있으면 YES와 함께 검색할 키워드를 한 줄로.
-반드시 YES 또는 NO로 시작해.`;
+지금 이 시각에 사용자에게 알릴 만한 것이 있을지 판단해.
+예: 비/눈 예보, 미세먼지, 대형 뉴스, 주가 급변, 중요 이벤트, 흥미로운 소식 등.
+평범한 하루라면 NO. 뭔가 있으면 YES와 검색 키워드를 한 줄로.
+반드시 YES 또는 NO로 시작.`;
 
-          console.log("[Lumen] gate check (lightweight)");
-          const gateResult = await this.config.runSubagent(gatePrompt);
+          console.log("[Lumen] gate check (ollama local, $0)");
+          const gateResult = await this.callOllamaGate(gatePrompt);
 
           if (!gateResult || !gateResult.toUpperCase().startsWith("YES")) {
             console.log("[Lumen] gate: NO — nothing worth sending");
@@ -550,6 +550,30 @@ class CognitiveTimer {
       // 실패하면 활동 중이 아닌 걸로 간주
     }
     return false;
+  }
+
+  /** Ollama 로컬 모델로 gate 판단 — 완전 무료 ($0). */
+  private async callOllamaGate(prompt: string): Promise<string | null> {
+    try {
+      const resp = await fetch("http://127.0.0.1:11434/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "qwen2.5-coder:32b",
+          prompt,
+          stream: false,
+          options: { num_predict: 100, temperature: 0.3 },
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as { response?: string };
+      return data.response?.trim() ?? null;
+    } catch (err) {
+      console.log("[Lumen] ollama gate failed, falling back to subagent:", err);
+      // Ollama 실패 시 subagent로 폴백
+      return this.config.runSubagent(prompt);
+    }
   }
 
   private checkRateLimit(now: number): boolean {
