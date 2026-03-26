@@ -44,7 +44,7 @@ const DAILY_CAP = 20;
 const BACKOFF_MULTIPLIER = 2;
 const MAX_BACKOFF_MS = 2 * 60 * 60 * 1000; // 2 hours
 const DEFAULT_BACKOFF_MS = MIN_INTERVAL_MS;
-const HIGH_SEVERITY_THRESHOLD = 0.6;
+const HIGH_SEVERITY_THRESHOLD = 0.2;
 
 // ─── CognitiveTimer ─────────────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ export class CognitiveTimer {
     const duty = this.drives.get("duty");
     const vigilance = this.drives.get("vigilance");
 
-    if (curiosity > 0.4 && duty < 0.5 && vigilance < 0.5) {
+    if (curiosity > 0.1 && duty < 0.5 && vigilance < 0.5) {
       const results = await this.probes.runDueProbes();
 
       // 3. Check for high-severity results

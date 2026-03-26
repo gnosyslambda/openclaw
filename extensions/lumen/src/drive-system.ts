@@ -16,7 +16,7 @@ const GROWTH_RATES: Record<DriveType, number> = {
   [DriveType.DUTY]: 0.08,
   [DriveType.VIGILANCE]: 0.03,
   [DriveType.SOCIAL]: 0.04,
-  [DriveType.CURIOSITY]: 0.02,
+  [DriveType.CURIOSITY]: 3.0, // ~5분이면 0.25 도달 → probe 실행 가능
 };
 
 /**
