@@ -315,6 +315,8 @@ class CognitiveTimer {
   private dailyProactiveCount = 0;
   /** 이미 보고한 probe 이름 — 상태가 해결될 때까지 재보고하지 않음 */
   private reportedProbes = new Set<string>();
+  /** 이미 보낸 탐색 주제 (반복 방지) */
+  private reportedExplorations = new Set<string>();
   /** 사용자가 "ㄴㄴ" 등으로 관심없다고 한 주제 */
   private suppressedTopics = new Set<string>();
   /** 마지막으로 보낸 탐색 주제 (ㄴㄴ 매칭용) */
@@ -444,27 +446,36 @@ class CognitiveTimer {
           {
             // Gemini 풀 탐색 (웹 검색 + 메시지 생성)
 
+            const recentTopics = [...this.reportedExplorations].join(", ") || "없음";
             const fullPrompt = `지금: ${timeStr} (서울)
 
-먼저 memory_search로 이전 대화를 확인해서 사용자의 관심사, 프로젝트, 작업 맥락을 파악해.
-그 다음 웹 검색으로 실시간 정보를 가져와. 지어내지 마.
+memory_search로 사용자 맥락 파악 후, 웹 검색으로 실시간 정보를 찾아.
 검색 키워드: ${searchHint}
 
 규칙:
-- 사용자의 맥락에 맞는 정보만. 일반적인 뉴스 나열 금지.
-- 구체적 사실. 숫자, 이름, 날짜 필수.
-- 가장 중요한 것 하나만 깊게.
-- 사용자가 다음 행동을 할 수 있게 제안 붙여 ("~할까요?")
-- 한국어, 짧게, 검열 없음.
-- 사용자와 관련 없거나 뻔하면 "없음".
+- 친구한테 카톡 보내듯이 써. 딱딱하게 쓰지 마.
+- 구체적 팩트 + 숫자 필수. 뻔한 정보 금지.
+- 이미 보낸 주제는 다시 보내지 마: ${recentTopics}
+- 사용자가 뭔가 할 수 있는 제안 붙여.
+- <final> 같은 태그 절대 쓰지 마. 순수 텍스트만.
+- 날씨 얘기만 하지 마. 다양하게.
+- 진짜 알려줄 게 없으면 "없음".
 
 금지: ${suppressedList}`;
 
             const result = await this.config.runSubagent(fullPrompt);
 
-            if (result && result !== "없음" && !result.startsWith("없음")) {
-              this.lastExplorationTopic = result.substring(0, 50);
-              const message = `💡 ${result}`;
+            // <final> 태그 제거
+            const cleaned = result?.replace(/<\/?final>/g, "").trim() ?? "";
+            if (cleaned && cleaned !== "없음" && !cleaned.startsWith("없음")) {
+              this.lastExplorationTopic = cleaned.substring(0, 50);
+              this.reportedExplorations.add(this.lastExplorationTopic);
+              // 최대 20개만 유지
+              if (this.reportedExplorations.size > 20) {
+                const first = this.reportedExplorations.values().next().value;
+                if (first) this.reportedExplorations.delete(first);
+              }
+              const message = cleaned;
               console.log("[Lumen] sending exploration message");
               await this.config.onProactiveMessage(message);
               this._lastProactiveAt = now;
