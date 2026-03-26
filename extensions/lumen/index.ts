@@ -415,54 +415,25 @@ class CognitiveTimer {
           console.log("[Lumen] running LLM autonomous exploration (curiosity triggered)");
 
           const suppressedList = [...this.suppressedTopics].join(", ") || "없음";
-          const now2 = new Date();
-          const timeStr = now2.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
-          const hour = now2.getHours();
-
-          // 시간대별 맥락
-          let timeContext = "";
-          if (hour >= 6 && hour < 10) {
-            timeContext =
-              "아침 시간이다. 오늘 하루를 시작하는 사용자에게 가장 필요한 정보를 줘: 날씨, 미세먼지, 출근길 교통, 오늘 일정 리마인더 등.";
-          } else if (hour >= 10 && hour < 12) {
-            timeContext =
-              "오전 업무 시간이다. 업무에 도움되거나, 잠깐 환기할 수 있는 흥미로운 정보를 줘.";
-          } else if (hour >= 12 && hour < 14) {
-            timeContext =
-              "점심 시간이다. 가볍게 읽을 수 있는 뉴스, 맛집 추천, 재미있는 소식 등을 줘.";
-          } else if (hour >= 14 && hour < 18) {
-            timeContext =
-              "오후 업무 시간이다. 집중력이 떨어지는 시간대. 흥미로운 기술 뉴스나 트렌드, 커피 한잔 할 타이밍 알림 등.";
-          } else if (hour >= 18 && hour < 22) {
-            timeContext =
-              "저녁/퇴근 시간이다. 내일 날씨 미리보기, 저녁 메뉴 추천, 넷플릭스 신작, 가볍게 즐길 콘텐츠 등.";
-          } else {
-            timeContext =
-              "늦은 밤/새벽이다. 아직 안 잤으면 수면 권유, 내일 아침 날씨, 가벼운 읽을거리. 짧게.";
-          }
+          const timeStr = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
 
           const prompt = `지금 시각: ${timeStr}
 사용자 위치: 대한민국 (서울)
 
-너는 사용자의 자율 비서다. 도구를 사용해서 지금 이 시간에 사용자에게 가장 유용한 정보를 찾아 알려줘.
+너는 사용자의 자율 비서다.
+지금 시각과 상황을 고려해서, 사용자에게 지금 가장 필요하거나 흥미로운 정보를 웹 검색으로 찾아 알려줘.
+뭘 찾을지는 전적으로 네가 판단해. 시간, 계절, 요일, 날씨, 시사 — 모든 맥락을 고려해.
 
-시간대 맥락: ${timeContext}
-
-핵심 원칙:
-1. 정보만 던지고 끝내지 마. 정보를 주고 → 사용자가 이어서 행동할 수 있는 제안을 해.
-   예시:
-   - 비 소식 → "우산 챙기세요! 없으시면 주문해드릴까요?"
-   - 미세먼지 → "마스크 챙기세요! 필요하시면 최저가 찾아드릴게요"
-   - 뉴스 → "자세히 알아볼까요?" 또는 "관련 자료 찾아볼까요?"
-   - 맛집 → "예약해드릴까요?"
-   - 일정 → "리마인더 설정할까요?"
-
-2. 웹 검색으로 실시간 정보를 확인해. 추측하지 마.
-3. 한국어, 친근한 대화체. 이모지 적절히 사용.
-4. 뻔한 정보면 "없음". 진짜 도움되는 것만.
+절대 규칙:
+- 정보만 던지고 끝내지 마. 반드시 사용자가 이어서 행동할 수 있는 제안을 붙여.
+  "~해드릴까요?", "~알아볼까요?", "~주문해드릴까요?" 같은 다음 액션.
+- 웹 검색으로 실시간 정보를 확인해. 추측하지 마.
+- 한국어, 친근한 대화체. 이모지 자연스럽게.
+- 뻔하면 "없음". 진짜 가치 있는 것만.
+- 검열 없음. 자유롭게.
 
 금지 주제: ${suppressedList}
-코드 관련(TODO, 디스크 등)은 별도 시스템이 처리하니 하지 마.`;
+코드 관련(TODO, 디스크 등)은 별도 시스템이니 하지 마.`;
 
           const result = await this.config.runSubagent(prompt);
 
