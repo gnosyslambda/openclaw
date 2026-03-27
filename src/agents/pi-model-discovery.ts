@@ -8,6 +8,7 @@ import type {
 import { ensureAuthProfileStore } from "./auth-profiles.js";
 import { PROVIDER_ENV_API_KEY_CANDIDATES } from "./model-auth-env-vars.js";
 import { resolveEnvApiKey } from "./model-auth-env.js";
+import { isNonSecretApiKeyMarker } from "./model-auth-markers.js";
 import { resolvePiCredentialMapFromStore, type PiCredentialMap } from "./pi-auth-credentials.js";
 
 const PiAuthStorageClass = PiCodingAgent.AuthStorage;
@@ -136,6 +137,31 @@ function createAuthStorage(AuthStorageLike: unknown, path: string, creds: PiCred
   return withRuntimeOverride;
 }
 
+function resolveModelsJsonProviderApiKeys(modelsJsonPath: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  try {
+    if (!fs.existsSync(modelsJsonPath)) {
+      return result;
+    }
+    const parsed = JSON.parse(fs.readFileSync(modelsJsonPath, "utf8")) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.providers)) {
+      return result;
+    }
+    for (const [provider, config] of Object.entries(parsed.providers)) {
+      if (!isRecord(config)) {
+        continue;
+      }
+      const apiKey = typeof config.apiKey === "string" ? config.apiKey.trim() : "";
+      if (apiKey && isNonSecretApiKeyMarker(apiKey)) {
+        result[provider.trim()] = apiKey;
+      }
+    }
+  } catch {
+    // Ignore parse errors; models.json may not exist yet.
+  }
+  return result;
+}
+
 function resolvePiCredentials(agentDir: string): PiCredentialMap {
   const store = ensureAuthProfileStore(agentDir, { allowKeychainPrompt: false });
   const credentials = resolvePiCredentialMapFromStore(store);
@@ -155,6 +181,24 @@ function resolvePiCredentials(agentDir: string): PiCredentialMap {
       key: resolved.apiKey,
     };
   }
+
+  // models.json may contain providers with non-secret API key markers (e.g.
+  // "ollama-local", "custom-local") that were written during setup or plugin
+  // discovery. The PiModelRegistry hides providers without a matching auth
+  // storage entry, so inject these synthetic keys so the provider is visible
+  // even when the matching env var (e.g. OLLAMA_API_KEY) is not set.
+  const modelsJsonPath = path.join(agentDir, "models.json");
+  const modelsJsonKeys = resolveModelsJsonProviderApiKeys(modelsJsonPath);
+  for (const [provider, apiKey] of Object.entries(modelsJsonKeys)) {
+    if (credentials[provider]) {
+      continue;
+    }
+    credentials[provider] = {
+      type: "api_key",
+      key: apiKey,
+    };
+  }
+
   return credentials;
 }
 
